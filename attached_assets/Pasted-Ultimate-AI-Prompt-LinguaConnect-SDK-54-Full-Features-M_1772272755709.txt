@@ -1,0 +1,45 @@
+Ultimate AI Prompt (LinguaConnect, SDK 54, Full Features, Multilingual & Responsive AI)
+
+Task: Build a fully functional, modern, and clean language learning mobile app ready to run on Expo Go SDK 54. The app should support all languages and be fully responsive. AI chat should respond instantly and naturally in any language.
+
+Features to include:
+
+User Authentication: Register, Login, Logout with email/password.
+
+Lessons Module: Lessons for multiple languages, organized by skill level, with text, images, and optional audio. Users can complete lessons and track progress.
+
+Quiz Module: After each lesson, multiple-choice, true/false, and fill-in-the-blank exercises.
+
+Progress Tracking: Users can see lesson completion, streaks, and scores.
+
+AI Chat Practice: Real-time GPT-based chat in any selected language, fully responsive and conversational. Should handle spelling mistakes, slang, and different sentence structures naturally.
+
+Voice Rooms: Real-time voice chat via WebRTC, organized by language or topic. Users can join/leave rooms, mute/unmute, and see participants. Works for all languages supported by the app.
+
+Clean UI: Minimalist, modern, smooth animations, readable fonts, consistent colors, responsive layout for different screen sizes.
+
+Tech Stack:
+
+Frontend: React Native + Expo SDK 54
+
+Backend: FastAPI (Python) with database (PostgreSQL or MongoDB)
+
+AI Integration: GPT via Emergent LLM key, multilingual capable, fully responsive
+
+Voice Integration: WebRTC for real-time voice rooms
+
+Project Structure: Ready-to-run with proper folder structure, code separation, and sample lessons
+
+Output Requirements:
+
+Full working frontend + backend code
+
+Sample dataset with lessons and quizzes in multiple languages
+
+Functional AI chat and voice rooms
+
+Instructions for local setup, running the app, and connecting AI + Voice Rooms
+
+Optional dark/light theme toggle
+
+⚡ Important: The app must be production-ready, fully functional, responsive, and able to handle all languages in lessons, quizzes, AI chat, and voice rooms. No placeholder UI — everything must work out of the box.
