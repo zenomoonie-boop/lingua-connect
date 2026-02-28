@@ -28,6 +28,7 @@ export type LessonContent = {
 };
 
 export const LANGUAGES: Language[] = [
+  { code: "en", name: "English", flag: "EN", color: "#2563EB" },
   { code: "es", name: "Spanish", flag: "ES", color: "#FF6B35" },
   { code: "fr", name: "French", flag: "FR", color: "#45B7D1" },
   { code: "ja", name: "Japanese", flag: "JP", color: "#FF4757" },
