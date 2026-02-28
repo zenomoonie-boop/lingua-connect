@@ -138,12 +138,12 @@ function SpeakingPulse({ color, active }: { color: string; active: boolean }) {
       const loop = Animated.loop(
         Animated.parallel([
           Animated.sequence([
-            Animated.timing(pulse, { toValue: 1.4, duration: 700, useNativeDriver: true }),
-            Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+            Animated.timing(pulse, { toValue: 1.4, duration: 700, useNativeDriver: Platform.OS !== "web" }),
+            Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: Platform.OS !== "web" }),
           ]),
           Animated.sequence([
-            Animated.timing(opacity, { toValue: 0.5, duration: 700, useNativeDriver: true }),
-            Animated.timing(opacity, { toValue: 0, duration: 700, useNativeDriver: true }),
+            Animated.timing(opacity, { toValue: 0.5, duration: 700, useNativeDriver: Platform.OS !== "web" }),
+            Animated.timing(opacity, { toValue: 0, duration: 700, useNativeDriver: Platform.OS !== "web" }),
           ]),
         ])
       );

@@ -16,15 +16,15 @@ function NativeTabLayout() {
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="chat">
         <Icon sf={{ default: "message", selected: "message.fill" }} />
-        <Label>AI Chat</Label>
+        <Label>Messages</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="voice">
         <Icon sf={{ default: "mic", selected: "mic.fill" }} />
         <Label>Rooms</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="progress">
-        <Icon sf={{ default: "chart.bar", selected: "chart.bar.fill" }} />
-        <Label>Progress</Label>
+        <Icon sf={{ default: "person", selected: "person.fill" }} />
+        <Label>Profile</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -79,9 +79,9 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="chat"
         options={{
-          title: "AI Chat",
+          title: "Messages",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="chatbubble-outline" size={size} color={color} />
+            <Ionicons name="chatbubbles-outline" size={size} color={color} />
           ),
         }}
       />
@@ -97,9 +97,9 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="progress"
         options={{
-          title: "Progress",
+          title: "Profile",
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="bar-chart-outline" size={size} color={color} />
+            <Ionicons name="person-outline" size={size} color={color} />
           ),
         }}
       />
