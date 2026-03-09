@@ -2,13 +2,14 @@ import React, { useState, useRef, useEffect, useMemo, useCallback } from "react"
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
   View, Text, FlatList, TextInput, Pressable,
-  StyleSheet, useColorScheme, Platform, Modal,
+  StyleSheet, useColorScheme, Platform, Modal, Image, Alert, Share,
 } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { fetch } from "expo/fetch";
 import * as Haptics from "expo-haptics";
+import { router } from "expo-router";
 import Colors from "@/constants/colors";
 import { ScreenBackdrop } from "@/components/ScreenBackdrop";
 import { useAuth } from "@/context/AuthContext";
@@ -42,9 +43,13 @@ type DiscoverUser = {
   id: string;
   displayName: string;
   avatarColor?: string;
+  avatarUri?: string;
   nativeLanguage?: string;
   learningLanguages?: string[];
   isActive?: boolean;
+  bio?: string;
+  followers?: number;
+  following?: number;
 };
 
 const SESSION_TOKEN_KEY = "lingua_session_token";
@@ -278,7 +283,7 @@ const fcStyle = StyleSheet.create({
   sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
 });
 
-function ConvRow({ conv, onPress, colors }: { conv: Conversation; onPress: () => void; colors: typeof Colors.dark }) {
+function ConvRow({ conv, onPress, onProfilePress, colors }: { conv: Conversation; onPress: () => void; onProfilePress?: () => void; colors: typeof Colors.dark }) {
   return (
     <Pressable
       onPress={onPress}
@@ -287,19 +292,21 @@ function ConvRow({ conv, onPress, colors }: { conv: Conversation; onPress: () =>
         { borderBottomColor: colors.border, backgroundColor: pressed ? colors.card + "80" : "transparent" },
       ]}
     >
-      <View style={{ position: "relative" }}>
-        <View style={[rowStyle.avatar, { backgroundColor: conv.avatarColor }]}>
-          <Text style={rowStyle.initials}>{conv.initials}</Text>
+      <Pressable onPress={onProfilePress}>
+        <View style={{ position: "relative" }}>
+          <View style={[rowStyle.avatar, { backgroundColor: conv.avatarColor }]}>
+            <Text style={rowStyle.initials}>{conv.initials}</Text>
+          </View>
+          {conv.isOnline && <View style={[rowStyle.online, { borderColor: colors.background }]} />}
         </View>
-        {conv.isOnline && <View style={[rowStyle.online, { borderColor: colors.background }]} />}
-      </View>
-      <View style={{ flex: 1 }}>
+      </Pressable>
+      <Pressable onPress={onProfilePress} style={{ flex: 1 }}>
         <View style={rowStyle.topLine}>
           <Text style={[rowStyle.name, { color: colors.text }]} numberOfLines={1}>{conv.name}</Text>
           <Text style={[rowStyle.time, { color: colors.muted }]}>{conv.lastTime}</Text>
         </View>
         <Text style={[rowStyle.last, { color: colors.muted }]} numberOfLines={1}>{conv.lastMessage || "No messages yet"}</Text>
-      </View>
+      </Pressable>
       {conv.unread > 0 && (
         <View style={[rowStyle.badge, { backgroundColor: colors.primary }]}>
           <Text style={rowStyle.badgeText}>{conv.unread}</Text>
@@ -442,12 +449,32 @@ const addStyle = StyleSheet.create({
   emptyText: { fontSize: 14, fontFamily: "Nunito_400Regular" },
 });
 
+// User Profile Modal Styles
+const profileModalStyle = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center" },
+  container: { width: "85%", maxWidth: 320, borderRadius: 24, padding: 24, alignItems: "center" },
+  avatar: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center" },
+  avatarText: { color: "#fff", fontSize: 28, fontFamily: "Nunito_800ExtraBold" },
+  name: { fontSize: 20, fontFamily: "Nunito_800ExtraBold", marginTop: 12 },
+  language: { fontSize: 14, fontFamily: "Nunito_600SemiBold", marginTop: 4 },
+  bio: { fontSize: 13, fontFamily: "Nunito_400Regular", textAlign: "center", marginTop: 12, color: "#888" },
+  stats: { flexDirection: "row", marginTop: 16, gap: 24 },
+  statItem: { alignItems: "center" },
+  statNum: { fontSize: 18, fontFamily: "Nunito_800ExtraBold" },
+  statLabel: { fontSize: 11, fontFamily: "Nunito_400Regular", color: "#888" },
+  followBtn: { marginTop: 16, paddingHorizontal: 32, paddingVertical: 12, borderRadius: 24 },
+  followBtnText: { fontSize: 15, fontFamily: "Nunito_700Bold" },
+  viewProfileBtn: { marginTop: 12, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 20, borderWidth: 1 },
+  viewProfileText: { fontSize: 14, fontFamily: "Nunito_600SemiBold" },
+  closeBtn: { position: "absolute", top: 12, right: 12, width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
+});
+
 export default function MessagesScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
-  const { user } = useAuth();
+  const { user, toggleFollowUser, isFollowingUser } = useAuth();
   const { refreshTick, setActiveConversationId } = useMessaging();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -457,6 +484,62 @@ export default function MessagesScreen() {
   const [discoverUsers, setDiscoverUsers] = useState<DiscoverUser[]>([]);
   const [discoverSearch, setDiscoverSearch] = useState("");
   const [isDiscoverLoading, setIsDiscoverLoading] = useState(false);
+  
+  // Profile modal state
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [selectedProfile, setSelectedProfile] = useState<DiscoverUser | null>(null);
+  const [isFollowing, setIsFollowing] = useState(false);
+
+  // Function to open profile modal from conversation
+  const handleOpenProfile = useCallback((conv: Conversation) => {
+    const profileData: DiscoverUser = {
+      id: conv.userId,
+      displayName: conv.name,
+      avatarColor: conv.avatarColor,
+      nativeLanguage: conv.nativeLanguage,
+      learningLanguages: conv.learningLanguage ? [conv.learningLanguage] : [],
+      isActive: conv.isOnline,
+      bio: `${conv.name} is a language learner on LinguaConnect`,
+    };
+    setSelectedProfile(profileData);
+    setIsFollowing(user ? isFollowingUser(conv.userId) : false);
+    setShowProfileModal(true);
+  }, [user, isFollowingUser]);
+
+  // Function to handle follow/unfollow
+  const handleFollow = useCallback(async () => {
+    if (!selectedProfile || !user) {
+      Alert.alert("Sign In Required", "Please sign in to follow users.");
+      return;
+    }
+    
+    try {
+      const result = await toggleFollowUser(selectedProfile.id);
+      setIsFollowing(result);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert("Error", "Failed to update follow status.");
+    }
+  }, [selectedProfile, user, toggleFollowUser]);
+
+  // Function to navigate to full profile
+  const handleViewFullProfile = useCallback(() => {
+    if (!selectedProfile) return;
+    setShowProfileModal(false);
+    router.push({
+      pathname: "/user/[id]",
+      params: {
+        id: selectedProfile.id,
+        name: selectedProfile.displayName,
+        initials: selectedProfile.displayName.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
+        color: selectedProfile.avatarColor || "#4ECDC4",
+        avatarUri: selectedProfile.avatarUri,
+        language: selectedProfile.nativeLanguage || "English",
+        bio: selectedProfile.bio || "",
+      },
+    });
+  }, [selectedProfile]);
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
 
@@ -684,6 +767,7 @@ export default function MessagesScreen() {
               setConversations((prev) => prev.map((c) => c.id === item.id ? { ...c, unread: 0 } : c));
               setOpenConv(item);
             }}
+            onProfilePress={() => handleOpenProfile(item)}
           />
         )}
         showsVerticalScrollIndicator={false}
@@ -728,6 +812,67 @@ export default function MessagesScreen() {
           insets={{ bottom: insets.bottom }}
         />
       )}
+
+      {/* User Profile Modal */}
+      <Modal
+        visible={showProfileModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowProfileModal(false)}
+      >
+        <Pressable style={profileModalStyle.overlay} onPress={() => setShowProfileModal(false)}>
+          <Pressable style={[profileModalStyle.container, { backgroundColor: colors.card }]} onPress={() => {}}>
+            <Pressable style={[profileModalStyle.closeBtn, { backgroundColor: colors.background }]} onPress={() => setShowProfileModal(false)}>
+              <Ionicons name="close" size={18} color={colors.text} />
+            </Pressable>
+            
+            {/* Avatar */}
+            <View style={[profileModalStyle.avatar, { backgroundColor: selectedProfile?.avatarColor || colors.primary }]}>
+              <Text style={profileModalStyle.avatarText}>
+                {selectedProfile?.displayName?.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2) || "??"}
+              </Text>
+            </View>
+            
+            {/* Name */}
+            <Text style={[profileModalStyle.name, { color: colors.text }]}>{selectedProfile?.displayName || "User"}</Text>
+            
+            {/* Language */}
+            <Text style={[profileModalStyle.language, { color: colors.primary }]}>
+              {selectedProfile?.nativeLanguage || "English"} speaker
+              {selectedProfile?.learningLanguages?.[0] ? ` · Learning ${selectedProfile.learningLanguages[0]}` : ""}
+            </Text>
+            
+            {/* Bio */}
+            <Text style={[profileModalStyle.bio, { color: colors.muted }]} numberOfLines={2}>
+              {selectedProfile?.bio || "Language learner on LinguaConnect"}
+            </Text>
+            
+            {/* Follow Button */}
+            {user && selectedProfile?.id !== user.id && (
+              <Pressable
+                onPress={handleFollow}
+                style={[
+                  profileModalStyle.followBtn,
+                  { backgroundColor: isFollowing ? colors.card : colors.primary },
+                  { borderWidth: isFollowing ? 1 : 0, borderColor: colors.border }
+                ]}
+              >
+                <Text style={[profileModalStyle.followBtnText, { color: isFollowing ? colors.text : "#fff" }]}>
+                  {isFollowing ? "Following" : "Follow"}
+                </Text>
+              </Pressable>
+            )}
+            
+            {/* View Full Profile Button */}
+            <Pressable
+              onPress={handleViewFullProfile}
+              style={[profileModalStyle.viewProfileBtn, { borderColor: colors.border }]}
+            >
+              <Text style={[profileModalStyle.viewProfileText, { color: colors.text }]}>View Full Profile</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

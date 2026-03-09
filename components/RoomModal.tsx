@@ -194,6 +194,7 @@ const rmStyles = StyleSheet.create({
   audienceItem: { alignItems: "center", width: 34 },
   audienceAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)" },
   audienceInitials: { color: "#fff", fontSize: 11, fontFamily: "Nunito_800ExtraBold" },
+  audienceRaisedHand: { position: "absolute", bottom: -2, right: -2, width: 14, height: 14, borderRadius: 7, backgroundColor: "#F7C948", alignItems: "center", justifyContent: "center", borderWidth: 1.5, borderColor: "rgba(10,14,20,0.95)" },
   audienceEmpty: { color: "rgba(255,255,255,0.48)", fontSize: 12, fontFamily: "Nunito_600SemiBold", textAlign: "center", paddingVertical: 8 },
   chatContainer: {
     position: "absolute",
@@ -720,12 +721,13 @@ function LoopingRoomTitle({ title }: { title: string }) {
 }
 
 function ParticipantSlot({
-  initials, color, avatarUri, name, isSpeaking, isMuted, isHost, isModerator, reactions, onRemoveReaction, onPress
+  initials, color, avatarUri, name, isSpeaking, isMuted, isHost, isModerator, reactions, onRemoveReaction, onPress, isSpeaker
 }: {
   initials: string | null; color: string | null; avatarUri?: string | null; name: string | null; isSpeaking: boolean; isMuted: boolean; isHost?: boolean; isModerator?: boolean;
   reactions?: { id: string; emoji: string }[];
   onRemoveReaction?: (reactionId: string) => void;
   onPress?: () => void;
+  isSpeaker?: boolean;
 }) {
   const isEmpty = !name;
 
@@ -746,12 +748,12 @@ function ParticipantSlot({
                 <Text style={slotStyles.initials}>{initials}</Text>
               </View>
             )}
-            {isMuted && !isSpeaking && (
+            {isSpeaker && isMuted && !isSpeaking && (
               <View style={slotStyles.badge}>
                 <Ionicons name="mic-off" size={9} color="#fff" />
               </View>
             )}
-            {isSpeaking && (
+            {isSpeaker && isSpeaking && (
               <View style={[slotStyles.badge, { backgroundColor: color! }]}>
                 <Ionicons name="mic" size={9} color="#fff" />
               </View>
@@ -814,7 +816,7 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
   const existingParticipant = activeRoom.participants.find((participant) => participant.id === currentUserId);
   const isHost = (activeRoom.hostId || activeRoom.participants[0]?.id || currentUserId) === currentUserId;
   const [isMuted, setIsMuted] = useState(existingParticipant?.isMuted ?? !isHost);
-  const [role, setRole] = useState<"listener" | "speaker">(isHost ? "speaker" : existingParticipant?.role || "listener");
+  const [role, setRole] = useState<"listener" | "speaker">("listener"); // Default to listener (audience)
   const [showLeaveMenu, setShowLeaveMenu] = useState(false);
   const [showRequestsMenu, setShowRequestsMenu] = useState(false);
   const [showReactionMenu, setShowReactionMenu] = useState(false);
@@ -823,6 +825,7 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<RoomMessage[]>(room.messages || []);
   const [isTyping, setIsTyping] = useState(false);
+  const [isOnStage, setIsOnStage] = useState(false); // Track if user is on stage
   const chatRef = useRef<ScrollView>(null);
   const chatInputRef = useRef<TextInput>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -844,8 +847,10 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
 
   useEffect(() => {
     const participant = activeRoom.participants.find((item) => item.id === currentUserId);
-    setRole(isHost ? "speaker" : participant?.role || "listener");
-    setIsMuted(participant?.isMuted ?? !isHost);
+    const isSpeaker = isHost || participant?.role === "speaker";
+    setRole(isSpeaker ? "speaker" : "listener");
+    setIsOnStage(isSpeaker);
+    setIsMuted(participant?.isMuted ?? !isSpeaker);
   }, [activeRoom.participants, currentUserId, isHost]);
 
   useEffect(() => {
@@ -1099,17 +1104,19 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
   };
 
   const participantSlots = useMemo(() => {
-    const allParticipants = (activeRoom.participants || []).filter(p => p.id !== user?.id);
+    // Only show speakers on stage - filter to only show participants with role "speaker"
+    const speakersOnStage = (activeRoom.participants || []).filter(p => p.role === "speaker" && p.id !== user?.id);
 
     return Array.from({ length: 10 }, (_, i) => {
-      if (i === 0) {
+      // If user is on stage, show them in first slot
+      if (i === 0 && isOnStage) {
         return {
           id: user?.id || "me",
           name: myName,
           initials: myInitials,
           color: myColor,
           avatarUri: user?.avatarUri,
-          role: role,
+          role: "speaker",
           isMuted: isMuted,
           isSpeaking: false,
           nativeLanguage: "English",
@@ -1118,12 +1125,18 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
           displayColor: myColor,
           displayAvatarUri: user?.avatarUri,
           isMe: true,
+          isOnStage: true,
           reactions: reactions[user?.id || "me"],
           onRemoveReaction: (reactionId: string) => handleRemoveReaction(user?.id || "me", reactionId),
         };
       }
 
-      const participant = allParticipants[i - 1];
+      // If user is not on stage, don't show them in speaker slots
+      if (!isOnStage) {
+        return null;
+      }
+
+      const participant = speakersOnStage[i - 1];
 
       if (participant) {
         return {
@@ -1133,6 +1146,7 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
           displayColor: participant.color,
           displayAvatarUri: participant.avatarUri,
           isMe: false,
+          isOnStage: true,
           reactions: reactions[participant.id],
           isModerator: participant.isModerator,
           onRemoveReaction: (reactionId: string) => handleRemoveReaction(participant.id, reactionId),
@@ -1140,9 +1154,10 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
       }
       return null;
     });
-  }, [activeRoom.participants, user, role, isMuted, reactions, myName, myInitials, myColor]);
+  }, [activeRoom.participants, user, role, isMuted, reactions, myName, myInitials, myColor, isOnStage]);
 
   const audiencePreview = useMemo(() => {
+    // Get listeners (not speakers) - but include current user if not on stage
     const listeners = (activeRoom.participants || [])
       .filter((participant) => participant.id !== currentUserId && participant.role !== "speaker")
       .map((participant) => ({
@@ -1150,7 +1165,21 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
         initials: participant.initials,
         color: participant.color,
         name: participant.name,
+        isPending: false,
+        isMe: false,
       }));
+
+    // If current user is not on stage, add them to audience
+    if (!isOnStage) {
+      listeners.unshift({
+        id: currentUserId,
+        initials: myInitials,
+        color: myColor,
+        name: myName,
+        isPending: false,
+        isMe: true,
+      });
+    }
 
     const pending = speakerRequests
       .filter((request) => !listeners.some((participant) => participant.id === request.userId))
@@ -1159,10 +1188,12 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
         initials: request.initials,
         color: request.color,
         name: request.name,
+        isPending: true,
+        isMe: false,
       }));
 
     return [...listeners, ...pending].slice(0, 8);
-  }, [activeRoom.participants, currentUserId, speakerRequests]);
+  }, [activeRoom.participants, currentUserId, speakerRequests, isOnStage, myName, myInitials, myColor]);
 
   const leaveRecommendations = useMemo(
     () => recommendedRooms.filter((candidate) => candidate.id !== activeRoom.id).slice(0, 8),
@@ -1252,10 +1283,12 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
                   isMuted={slot?.isMuted || (slot?.isMe ? isMuted : true)}
                   isHost={slot?.id === (activeRoom.hostId || activeRoom.participants[0]?.id || currentUserId)}
                   isModerator={Boolean((slot as any)?.isModerator)}
+                  isSpeaker={slot?.isOnStage || false}
                   reactions={slot?.reactions}
                   onRemoveReaction={slot?.onRemoveReaction}
                   onPress={() => {
                     if (!slot) return;
+                    // Only show profile when clicking on own avatar or other participants
                     if (slot.isMe) {
                       router.push({
                         pathname: "/user/[id]",
@@ -1289,6 +1322,7 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
                   isMuted={slot?.isMuted || true}
                   isHost={false}
                   isModerator={Boolean((slot as any)?.isModerator)}
+                  isSpeaker={slot?.isOnStage || false}
                   reactions={slot?.reactions}
                   onRemoveReaction={slot?.onRemoveReaction}
                   onPress={() => {
@@ -1329,6 +1363,16 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
                     key={participant.id}
                     style={rmStyles.audienceItem}
                     onPress={() => {
+                      // If it's me (current user), don't do anything - show profile via stage
+                      if (participant.isMe) {
+                        return;
+                      }
+                      // Check if it's a pending request
+                      const request = speakerRequests.find(r => r.userId === participant.id);
+                      if (request || participant.isPending) {
+                        setShowRequestsMenu(true);
+                        return;
+                      }
                       const fullParticipant = activeRoom.participants.find((item) => item.id === participant.id);
                       if (fullParticipant) {
                         setSelectedParticipant(fullParticipant);
@@ -1338,6 +1382,11 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
                     <View style={[rmStyles.audienceAvatar, { backgroundColor: participant.color }]}>
                       <Text style={rmStyles.audienceInitials}>{participant.initials}</Text>
                     </View>
+                    {participant.isPending && (
+                      <View style={rmStyles.audienceRaisedHand}>
+                        <Ionicons name="hand-left" size={8} color="#111827" />
+                      </View>
+                    )}
                   </Pressable>
                 ))}
               </ScrollView>
@@ -1347,25 +1396,24 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
           </View>
         </View>
 
-        {(chatMessages.length > 0 || chatInput.trim()) && (
-          <View style={rmStyles.chatContainer}>
-            <ScrollView 
-              ref={chatRef}
-              style={{ maxHeight: 340 }}
-              contentContainerStyle={rmStyles.chatMessages}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              {chatMessages.length === 0 ? (
-                <Text style={rmStyles.chatEmpty}>Start the conversation</Text>
-              ) : (
-                chatMessages.map(msg => (
-                  <Bubble key={msg.id} msg={msg} />
-                ))
-              )}
-            </ScrollView>
-          </View>
-        )}
+        {/* Chat is always visible for all users */}
+        <View style={rmStyles.chatContainer}>
+          <ScrollView 
+            ref={chatRef}
+            style={{ maxHeight: 340 }}
+            contentContainerStyle={rmStyles.chatMessages}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {chatMessages.length === 0 ? (
+              <Text style={rmStyles.chatEmpty}>Start the conversation</Text>
+            ) : (
+              chatMessages.map(msg => (
+                <Bubble key={msg.id} msg={msg} />
+              ))
+            )}
+          </ScrollView>
+        </View>
 
         {showReactionMenu && !isTyping && (
           <View style={reactionStyles.menu}>
@@ -1379,56 +1427,65 @@ export default function RoomModal({ room, user, onLeave, onMinimize, visible, on
 
         {!isTyping && (
           <View style={rmStyles.floatingMicWrap}>
-            <Pressable
-              onPress={() => {
-                const nextMuted = !isMuted;
-                setIsMuted(nextMuted);
-                const currentParticipant: RoomParticipant = {
-                  id: currentUserId,
-                  name: myName,
-                  initials: myInitials,
-                  color: myColor,
-                  avatarUri: user?.avatarUri,
-                  role,
-                  isMuted: nextMuted,
-                  isSpeaking: false,
-                  nativeLanguage: user?.nativeLanguage || activeRoom.language,
-                };
-                const hasCurrentParticipant = activeRoom.participants.some((participant) => participant.id === currentUserId);
-                const updatedParticipants = hasCurrentParticipant
-                  ? activeRoom.participants.map((participant) =>
-                      participant.id === currentUserId ? { ...participant, isMuted: nextMuted } : participant,
-                    )
-                  : [...activeRoom.participants, currentParticipant];
-                const nextRoom = { ...activeRoom, participants: updatedParticipants };
-                setRoomState(nextRoom);
-                onUpdateRoom(nextRoom);
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              }}
-              style={[rmStyles.ctrlBtn, !isMuted && { backgroundColor: "rgba(239,68,68,0.92)", borderColor: "transparent" }]}
-            >
-              <Ionicons name={isMuted ? "mic-off" : "mic"} size={18} color="#fff" />
-            </Pressable>
+            {/* Show raised hand for listeners (not on stage), mic for speakers (on stage) */}
+            {!isOnStage ? (
+              <Pressable
+                onPress={myRaiseRequest ? cancelRaiseHandRequest : submitRaiseHandRequest}
+                style={[rmStyles.ctrlBtn, myRaiseRequest && { backgroundColor: "#F7C948", borderColor: "#F7C948" }]}
+              >
+                <Ionicons name={myRaiseRequest ? "hand-left" : "hand-right"} size={18} color="#fff" />
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => {
+                  const nextMuted = !isMuted;
+                  setIsMuted(nextMuted);
+                  const currentParticipant: RoomParticipant = {
+                    id: currentUserId,
+                    name: myName,
+                    initials: myInitials,
+                    color: myColor,
+                    avatarUri: user?.avatarUri,
+                    role: "speaker",
+                    isMuted: nextMuted,
+                    isSpeaking: false,
+                    nativeLanguage: user?.nativeLanguage || activeRoom.language,
+                  };
+                  const hasCurrentParticipant = activeRoom.participants.some((participant) => participant.id === currentUserId);
+                  const updatedParticipants = hasCurrentParticipant
+                    ? activeRoom.participants.map((participant) =>
+                        participant.id === currentUserId ? { ...participant, isMuted: nextMuted } : participant,
+                      )
+                    : [...activeRoom.participants, currentParticipant];
+                  const nextRoom = { ...activeRoom, participants: updatedParticipants };
+                  setRoomState(nextRoom);
+                  onUpdateRoom(nextRoom);
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }}
+                style={[rmStyles.ctrlBtn, !isMuted && { backgroundColor: "rgba(239,68,68,0.92)", borderColor: "transparent" }]}
+              >
+                <Ionicons name={isMuted ? "mic-off" : "mic"} size={18} color="#fff" />
+              </Pressable>
+            )}
           </View>
         )}
 
         <View style={[rmStyles.controls, { paddingBottom: botPad }]}>
-          {!isTyping && <View style={rmStyles.requestRow}>
-            {!isHost && role === "listener" ? (
+          {/* Raise Hand is now handled by floating button for listeners */}
+          <View style={rmStyles.requestRow}>
+            {isHost && speakerRequests.length > 0 && (
               <Pressable
-                onPress={myRaiseRequest ? cancelRaiseHandRequest : submitRaiseHandRequest}
-                style={rmStyles.noticeCard}
+                onPress={() => setShowRequestsMenu(true)}
+                style={[rmStyles.noticeCard, { backgroundColor: "#F7C94820" }]}
               >
-                <Ionicons name="hand-left" size={18} color={myRaiseRequest ? "#F7C948" : "#fff"} />
+                <Ionicons name="hand-left" size={18} color="#F7C948" />
                 <View style={rmStyles.noticeTextWrap}>
-                  <Text style={rmStyles.noticeTitle}>{myRaiseRequest ? "I Raised Hand" : "Raise Hand"}</Text>
-                  <Text style={rmStyles.noticeSub}>
-                    {myRaiseRequest ? "Host will see your request" : "Ask the host to bring you up"}
-                  </Text>
+                  <Text style={[rmStyles.noticeTitle, { color: "#F7C948" }]}>{speakerRequests.length} raised hand</Text>
+                  <Text style={rmStyles.noticeSub}>Tap to review requests</Text>
                 </View>
               </Pressable>
-            ) : null}
-          </View>}
+            )}
+          </View>
           <View style={rmStyles.controlsRow}>
             <View style={rmStyles.controlsMain}>
               <View style={rmStyles.messageInputWrap}>

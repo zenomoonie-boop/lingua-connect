@@ -560,20 +560,30 @@ const editStyle = StyleSheet.create({
 
 // ─── Moment Card ──────────────────────────────────────────────────────────────
 
-function MomentCard({ moment, colors, userColor, userInitials }: {
+function MomentCard({ moment, colors, userColor, userInitials, onUserPress, onCommentPress, onSharePress }: {
   moment: UserMoment; colors: typeof Colors.dark; userColor: string; userInitials: string;
+  onUserPress?: (userId: string) => void;
+  onCommentPress?: (momentId: string) => void;
+  onSharePress?: (moment: UserMoment) => void;
 }) {
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(moment.likes);
+  const [showComments, setShowComments] = useState(false);
   const cardColor = moment.userColor || userColor;
   const cardInitials = moment.userInitials || userInitials;
   return (
     <View style={[mStyle.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={mStyle.top}>
-        <View style={[mStyle.avatar, { backgroundColor: cardColor }]}>
+        <Pressable
+          onPress={() => onUserPress?.(moment.userId)}
+          style={[mStyle.avatar, { backgroundColor: cardColor }]}
+        >
           <Text style={mStyle.initials}>{cardInitials}</Text>
-        </View>
+        </Pressable>
         <View style={{ flex: 1 }}>
+          <Pressable onPress={() => onUserPress?.(moment.userId)}>
+            <Text style={[mStyle.userName, { color: colors.text }]}>{moment.userName}</Text>
+          </Pressable>
           <View style={mStyle.langBadge}>
             <View style={[mStyle.langDot, { backgroundColor: moment.langColor }]} />
             <Text style={[mStyle.langText, { color: moment.langColor }]}>{moment.lang}</Text>
@@ -594,13 +604,19 @@ function MomentCard({ moment, colors, userColor, userInitials }: {
           <Ionicons name={liked ? "heart" : "heart-outline"} size={18} color={liked ? "#FF4757" : colors.muted} />
           <Text style={[mStyle.actionText, { color: colors.muted }]}>{likeCount}</Text>
         </Pressable>
-        <View style={mStyle.actionBtn}>
+        <Pressable
+          onPress={() => onCommentPress?.(moment.id)}
+          style={mStyle.actionBtn}
+        >
           <Ionicons name="chatbubble-outline" size={17} color={colors.muted} />
           <Text style={[mStyle.actionText, { color: colors.muted }]}>{moment.comments}</Text>
-        </View>
-        <View style={mStyle.actionBtn}>
+        </Pressable>
+        <Pressable
+          onPress={() => onSharePress?.(moment)}
+          style={mStyle.actionBtn}
+        >
           <Ionicons name="share-outline" size={18} color={colors.muted} />
-        </View>
+        </Pressable>
       </View>
     </View>
   );
@@ -611,6 +627,7 @@ const mStyle = StyleSheet.create({
   top: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, paddingBottom: 10 },
   avatar: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center" },
   initials: { color: "#fff", fontSize: 14, fontFamily: "Nunito_700Bold" },
+  userName: { fontSize: 14, fontFamily: "Nunito_700Bold" },
   langBadge: { flexDirection: "row", alignItems: "center", gap: 5 },
   langDot: { width: 7, height: 7, borderRadius: 3.5 },
   langText: { fontSize: 12, fontFamily: "Nunito_700Bold" },
@@ -1116,6 +1133,18 @@ export default function ProfileScreen() {
                   colors={colors}
                   userColor={avatarColor}
                   userInitials={initials}
+                  onUserPress={(userId) => {
+                    router.push({
+                      pathname: "/user/[id]",
+                      params: { id: userId },
+                    });
+                  }}
+                  onCommentPress={(momentId) => {
+                    Alert.alert("Comments", `Comments for moment ${momentId} - Feature coming soon!`);
+                  }}
+                  onSharePress={(moment) => {
+                    Alert.alert("Share", `Sharing: "${moment.text.substring(0, 50)}..."`);
+                  }}
                 />
               ))}
             </View>
