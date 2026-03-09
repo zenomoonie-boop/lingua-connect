@@ -1531,9 +1531,13 @@ var VoiceRealtimeService = class {
 var voiceRealtime = new VoiceRealtimeService();
 
 // server/routes.ts
-var openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY
-});
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  if (!apiKey) {
+    return null;
+  }
+  return new OpenAI({ apiKey });
+}
 function hashPassword(password) {
   return createHash("sha256").update(password).digest("hex");
 }
@@ -2008,7 +2012,11 @@ Your role:
       ...messages3
     ];
     try {
-      const stream = await openai.chat.completions.create({
+      const openai2 = getOpenAIClient();
+      if (!openai2) {
+        return res.status(503).json({ error: "AI unavailable" });
+      }
+      const stream = await openai2.chat.completions.create({
         model: "gpt-4o",
         messages: chatMessages,
         stream: true,
@@ -2095,7 +2103,7 @@ import { randomUUID as randomUUID2 } from "crypto";
 import { tmpdir } from "os";
 import { join } from "path";
 import "dotenv/config";
-var openai2 = new OpenAI2({
+var openai = new OpenAI2({
   apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.OPENAI_BASE_URL || process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
 });
@@ -2168,7 +2176,7 @@ async function ensureCompatibleFormat(audioBuffer) {
 }
 async function speechToText(audioBuffer, format = "wav") {
   const file = await toFile(audioBuffer, `audio.${format}`);
-  const response = await openai2.audio.transcriptions.create({
+  const response = await openai.audio.transcriptions.create({
     file,
     model: "gpt-4o-mini-transcribe"
   });
@@ -2257,7 +2265,7 @@ function registerAudioRoutes(app2) {
       res.write(`data: ${JSON.stringify({ type: "user_transcript", data: userTranscript })}
 
 `);
-      const stream = await openai2.chat.completions.create({
+      const stream = await openai.chat.completions.create({
         model: "gpt-audio",
         modalities: ["text", "audio"],
         audio: { voice, format: "pcm16" },

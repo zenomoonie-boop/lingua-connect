@@ -8,9 +8,14 @@ import { storage } from "./storage";
 import { voiceRoomsStore, type VoiceRoom } from "./voiceRoomsStore";
 import { voiceRealtime } from "./voiceRealtime";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-});
+function getOpenAIClient() {
+  const apiKey = process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  if (!apiKey) {
+    return null;
+  }
+
+  return new OpenAI({ apiKey });
+}
 
 function hashPassword(password: string) {
   return createHash("sha256").update(password).digest("hex");
@@ -572,6 +577,11 @@ Your role:
     ];
 
     try {
+      const openai = getOpenAIClient();
+      if (!openai) {
+        return res.status(503).json({ error: "AI unavailable" });
+      }
+
       const stream = await openai.chat.completions.create({
         model: "gpt-4o",
         messages: chatMessages,
