@@ -6,7 +6,7 @@ A fully functional multilingual language learning mobile app built with Expo SDK
 
 **Frontend:** React Native (Expo SDK 54) with Expo Router file-based routing  
 **Backend:** Express.js (TypeScript) on port 5000  
-**AI:** Replit AI Integrations (OpenAI gpt-5.2) for streaming chat  
+**AI:** Replit AI Integrations (OpenAI gpt-4o) for streaming chat
 **Storage:** AsyncStorage for user data, progress, and auth  
 **Font:** Nunito (Google Fonts) via @expo-google-fonts/nunito  
 
@@ -16,7 +16,7 @@ A fully functional multilingual language learning mobile app built with Expo SDK
 - **Lessons:** 15+ lessons across 8 languages (Spanish, French, Japanese, German, Portuguese, Mandarin, Korean, Italian), organized by Beginner/Intermediate/Advanced
 - **Quizzes:** Multiple-choice, true/false, and fill-in-the-blank after each lesson
 - **Progress Tracking:** XP points, streaks, completion rates, per-language stats
-- **AI Chat Practice:** Real-time GPT-5.2 streaming chat tutor in any language
+- **AI Chat Practice:** Real-time GPT-4o streaming chat tutor in any language
 - **Voice Rooms:** Simulated live voice practice rooms by language/topic
 - **Theme:** Dark/light mode with custom coral+teal palette
 

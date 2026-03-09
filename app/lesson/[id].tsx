@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { LESSONS, LANGUAGES } from "@/data/lessons";
+import { READINGS } from "@/data/readings";
 import { QUIZZES } from "@/data/quizzes";
 import * as Haptics from "expo-haptics";
 
@@ -18,7 +19,7 @@ export default function LessonScreen() {
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
 
-  const lesson = LESSONS.find(l => l.id === id);
+  const lesson = [...LESSONS, ...READINGS].find(l => l.id === id);
   const lang = lesson ? LANGUAGES.find(l => l.code === lesson.languageCode) : null;
   const hasQuiz = QUIZZES.some(q => q.lessonId === id);
 

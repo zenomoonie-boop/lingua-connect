@@ -1,3 +1,5 @@
+import { ADDITIONAL_LESSONS } from "@/data/additionalLessons";
+
 export type Language = {
   code: string;
   name: string;
@@ -37,9 +39,21 @@ export const LANGUAGES: Language[] = [
   { code: "zh", name: "Mandarin", flag: "CN", color: "#8B7CF6" },
   { code: "ko", name: "Korean", flag: "KR", color: "#4ECDC4" },
   { code: "it", name: "Italian", flag: "IT", color: "#FF6B9D" },
+  { code: "ar", name: "Arabic", flag: "SA", color: "#16A34A" },
+  { code: "hi", name: "Hindi", flag: "IN", color: "#F97316" },
+  { code: "ru", name: "Russian", flag: "RU", color: "#1D4ED8" },
+  { code: "tr", name: "Turkish", flag: "TR", color: "#DC2626" },
+  { code: "vi", name: "Vietnamese", flag: "VN", color: "#059669" },
+  { code: "th", name: "Thai", flag: "TH", color: "#7C3AED" },
+  { code: "id", name: "Indonesian", flag: "ID", color: "#EF4444" },
+  { code: "tl", name: "Filipino", flag: "PH", color: "#0EA5E9" },
+  { code: "nl", name: "Dutch", flag: "NL", color: "#F59E0B" },
+  { code: "sv", name: "Swedish", flag: "SE", color: "#3B82F6" },
+  { code: "pl", name: "Polish", flag: "PL", color: "#E11D48" },
+  { code: "el", name: "Greek", flag: "GR", color: "#2563EB" },
 ];
 
-export const LESSONS: Lesson[] = [
+const CORE_LESSONS: Lesson[] = [
   // SPANISH
   {
     id: "es-001",
@@ -419,4 +433,48 @@ export const LESSONS: Lesson[] = [
       },
     ],
   },
+  {
+    id: "tl-001",
+    languageCode: "tl",
+    title: "Kamusta! Filipino Basics",
+    description: "Learn simple Filipino greetings and polite everyday expressions.",
+    level: "Beginner",
+    xpReward: 55,
+    duration: 6,
+    content: [
+      {
+        type: "text",
+        title: "Everyday Filipino",
+        body: "Filipino is warm and conversational. A few basic greetings and polite words can help you sound natural right away.",
+      },
+      {
+        type: "phrase",
+        body: "Kamusta?",
+        translation: "Hello / How are you?",
+        example: "Kamusta? Masaya akong makita ka.",
+        exampleTranslation: "Hello? I am happy to see you.",
+      },
+      {
+        type: "phrase",
+        body: "Magandang umaga",
+        translation: "Good morning",
+        example: "Magandang umaga po sa inyong lahat.",
+        exampleTranslation: "Good morning to all of you.",
+      },
+      {
+        type: "vocab",
+        body: "Salamat / Walang anuman",
+        translation: "Thank you / You're welcome",
+        example: "Salamat sa tulong mo. Walang anuman!",
+        exampleTranslation: "Thank you for your help. You're welcome!",
+      },
+      {
+        type: "grammar",
+        title: "Po and Opo",
+        body: "Po and opo are polite Filipino words used to show respect, especially when speaking to elders or in formal situations.",
+      },
+    ],
+  },
 ];
+
+export const LESSONS: Lesson[] = [...CORE_LESSONS, ...ADDITIONAL_LESSONS];

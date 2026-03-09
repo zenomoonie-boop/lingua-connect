@@ -1,11 +1,18 @@
 import type { Express, Request, Response } from "express";
 import OpenAI from "openai";
+import "dotenv/config";
 import { chatStorage } from "./storage";
 
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  baseURL: process.env.OPENAI_BASE_URL || process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
+
+function parseRouteId(idParam: unknown): number | null {
+  const value = Array.isArray(idParam) ? idParam[0] : idParam;
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 export function registerChatRoutes(app: Express): void {
   // Get all conversations
@@ -22,7 +29,10 @@ export function registerChatRoutes(app: Express): void {
   // Get single conversation with messages
   app.get("/api/conversations/:id", async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseRouteId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: "Invalid conversation id" });
+      }
       const conversation = await chatStorage.getConversation(id);
       if (!conversation) {
         return res.status(404).json({ error: "Conversation not found" });
@@ -50,7 +60,10 @@ export function registerChatRoutes(app: Express): void {
   // Delete conversation
   app.delete("/api/conversations/:id", async (req: Request, res: Response) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = parseRouteId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: "Invalid conversation id" });
+      }
       await chatStorage.deleteConversation(id);
       res.status(204).send();
     } catch (error) {
@@ -62,7 +75,10 @@ export function registerChatRoutes(app: Express): void {
   // Send message and get AI response (streaming)
   app.post("/api/conversations/:id/messages", async (req: Request, res: Response) => {
     try {
-      const conversationId = parseInt(req.params.id);
+      const conversationId = parseRouteId(req.params.id);
+      if (conversationId === null) {
+        return res.status(400).json({ error: "Invalid conversation id" });
+      }
       const { content } = req.body;
 
       // Save user message
@@ -82,7 +98,7 @@ export function registerChatRoutes(app: Express): void {
 
       // Stream response from OpenAI
       const stream = await openai.chat.completions.create({
-        model: "gpt-5.1",
+        model: "gpt-4o-mini",
         messages: chatMessages,
         stream: true,
         max_completion_tokens: 8192,
@@ -115,4 +131,3 @@ export function registerChatRoutes(app: Express): void {
     }
   });
 }
-

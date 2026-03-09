@@ -1,22 +1,30 @@
 import { isLiquidGlassAvailable } from "expo-glass-effect";
-import { Tabs } from "expo-router";
+import { Redirect, Tabs } from "expo-router";
 import { NativeTabs, Icon, Label } from "expo-router/unstable-native-tabs";
 import { BlurView } from "expo-blur";
-import { Platform, StyleSheet, useColorScheme, View } from "react-native";
+import { ActivityIndicator, Platform, StyleSheet, useColorScheme, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import React from "react";
 import Colors from "@/constants/colors";
+import { useAuth } from "@/context/AuthContext";
+import { useMessaging } from "@/context/MessagingContext";
 
 function NativeTabLayout() {
+  const { unreadTotal } = useMessaging();
+
   return (
     <NativeTabs>
-      <NativeTabs.Trigger name="index">
+      <NativeTabs.Trigger name="home">
+        <Icon sf={{ default: "house", selected: "house.fill" }} />
+        <Label>Home</Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="learn">
         <Icon sf={{ default: "book", selected: "book.fill" }} />
         <Label>Learn</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="chat">
         <Icon sf={{ default: "message", selected: "message.fill" }} />
-        <Label>Messages</Label>
+        <Label>{unreadTotal > 0 ? `Messages (${unreadTotal})` : "Messages"}</Label>
       </NativeTabs.Trigger>
       <NativeTabs.Trigger name="voice">
         <Icon sf={{ default: "mic", selected: "mic.fill" }} />
@@ -31,6 +39,7 @@ function NativeTabLayout() {
 }
 
 function ClassicTabLayout() {
+  const { unreadTotal } = useMessaging();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
@@ -70,6 +79,21 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="index"
         options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="home"
+        options={{
+          title: "Home",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="learn"
+        options={{
           title: "Learn",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="book-outline" size={size} color={color} />
@@ -80,6 +104,7 @@ function ClassicTabLayout() {
         name="chat"
         options={{
           title: "Messages",
+          tabBarBadge: unreadTotal > 0 ? unreadTotal : undefined,
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="chatbubbles-outline" size={size} color={color} />
           ),
@@ -108,8 +133,32 @@ function ClassicTabLayout() {
 }
 
 export default function TabLayout() {
+  const colorScheme = useColorScheme();
+  const colors = colorScheme === "dark" ? Colors.dark : Colors.light;
+  const { user, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <View style={[styles.loadingWrap, { backgroundColor: colors.background }]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (!user) {
+    return <Redirect href="/(auth)/login" />;
+  }
+
   if (isLiquidGlassAvailable()) {
     return <NativeTabLayout />;
   }
   return <ClassicTabLayout />;
 }
+
+const styles = StyleSheet.create({
+  loadingWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});

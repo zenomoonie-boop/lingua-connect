@@ -238,4 +238,33 @@ export const QUIZZES: Quiz[] = [
       },
     ],
   },
+  {
+    lessonId: "tl-001",
+    questions: [
+      {
+        id: "tl001-q1",
+        type: "multiple-choice",
+        question: "What does 'Kamusta?' mean in Filipino?",
+        options: ["Good night", "Hello / How are you?", "Thank you", "Goodbye"],
+        correctAnswer: "Hello / How are you?",
+        explanation: "'Kamusta?' is a common Filipino greeting used like 'Hello' or 'How are you?' in conversation.",
+      },
+      {
+        id: "tl001-q2",
+        type: "multiple-choice",
+        question: "How do you say 'Good morning' in Filipino?",
+        options: ["Magandang gabi", "Magandang tanghali", "Magandang umaga", "Salamat"],
+        correctAnswer: "Magandang umaga",
+        explanation: "'Magandang umaga' means 'Good morning.'",
+      },
+      {
+        id: "tl001-q3",
+        type: "true-false",
+        question: "'Po' and 'opo' are used to show respect in Filipino.",
+        options: ["True", "False"],
+        correctAnswer: "True",
+        explanation: "Po and opo are polite Filipino expressions used when speaking respectfully.",
+      },
+    ],
+  },
 ];

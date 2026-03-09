@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: lingua-connect-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run server:build
+    startCommand: npm run server:prod
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false

@@ -1,528 +1,246 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   View, Text, Pressable, StyleSheet, FlatList,
   ScrollView, useColorScheme, Platform, Modal,
-  TextInput, Animated,
+  TextInput, Animated, ActivityIndicator, Easing, Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
+import { ScreenBackdrop } from "@/components/ScreenBackdrop";
 import { LANGUAGES } from "@/data/lessons";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth, type User } from "@/context/AuthContext";
 import * as Haptics from "expo-haptics";
+import FloatingVoicePlayer from "../../components/FloatingVoicePlayer";
+import RoomModal, { type VoiceRoom } from "../../components/RoomModal";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { apiRequest, getApiUrl } from "@/lib/query-client";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type RoomParticipant = {
-  id: string;
-  name: string;
-  initials: string;
-  color: string;
-  role: "speaker" | "listener";
-  isMuted: boolean;
-  isSpeaking: boolean;
-  nativeLanguage: string;
-};
-
-type VoiceRoom = {
-  id: string;
-  topic: string;
-  language: string;
-  languageCode: string;
-  description: string;
-  participants: RoomParticipant[];
-  maxParticipants: number;
-  level: "All Levels" | "Beginner" | "Intermediate" | "Advanced";
-  tags: string[];
-};
-
-type RoomMessage = {
-  id: string;
-  sender: string;
-  initials: string;
-  color: string;
-  text: string;
-  ts: number;
-};
-
-const AVATAR_COLORS = [
-  "#FF6B35", "#4ECDC4", "#45B7D1", "#8B7CF6", "#F7C948", "#6BCB77", "#FF4757", "#FF6B9D",
+// Constants
+const ROOM_THEMES = [
+  { id: "make_friends", name: "Make Friends", icon: "people" as const, color: "#FF6B35" },
+  { id: "chat", name: "Chat", icon: "chatbubbles" as const, color: "#4ECDC4" },
+  { id: "oral_practice", name: "Oral Practice", icon: "mic" as const, color: "#45B7D1" },
+  { id: "culture", name: "Culture", icon: "globe" as const, color: "#8B7CF6" },
+  { id: "music", name: "Music", icon: "musical-notes" as const, color: "#F7C948" },
 ];
+
+const BACKGROUND_OPTIONS = [
+  { id: "galaxy", name: "Galaxy", icon: "star" as const, color: "#4c1d95" },
+  { id: "rose", name: "Rose", icon: "rose" as const, color: "#e11d48" },
+  { id: "earth", name: "Earth", icon: "planet" as const, color: "#2563eb" },
+  { id: "sunflower", name: "Sunflower", icon: "sunny" as const, color: "#f59e0b" },
+  { id: "spring", name: "Spring", icon: "leaf" as const, color: "#4ade80" },
+  { id: "summer", name: "Summer", icon: "sunny" as const, color: "#facc15" },
+  { id: "autumn", name: "Autumn", icon: "leaf" as const, color: "#fb923c" },
+  { id: "winter", name: "Winter", icon: "snow" as const, color: "#60a5fa" },
+  { id: "sari_sari", name: "Sari-Sari", icon: "home" as const, color: "#eab308" },
+  { id: "mario", name: "Super Mario", icon: "game-controller" as const, color: "#ef4444" },
+];
+
+const ROOMS_KEY = "lingua_rooms";
+const USERS_KEY = "lingua_users";
+const LEGACY_DEMO_ROOM_IDS = new Set(["r-1", "r-2", "r-3", "r-4", "r-5", "r-6"]);
 
 function makeInitials(name: string) {
-  return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+  return name
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 }
 
-// ─── Room Data ────────────────────────────────────────────────────────────────
+function isFakeRoom(room: VoiceRoom): boolean {
+  if (LEGACY_DEMO_ROOM_IDS.has(room.id)) {
+    return true;
+  }
 
-const SAMPLE_ROOMS: VoiceRoom[] = [
-  {
-    id: "r1", topic: "Daily English Conversation", language: "English", languageCode: "en",
-    description: "Practice everyday English — talk about your day, hobbies, and current events.",
-    level: "All Levels", tags: ["Casual", "Beginner-friendly"],
-    maxParticipants: 12,
-    participants: [
-      { id: "u1", name: "Maria Santos", initials: "MS", color: "#FF6B35", role: "speaker", isMuted: false, isSpeaking: true, nativeLanguage: "Filipino" },
-      { id: "u2", name: "Liam Chen", initials: "LC", color: "#4ECDC4", role: "speaker", isMuted: false, isSpeaking: false, nativeLanguage: "Mandarin" },
-      { id: "u3", name: "Ana Reyes", initials: "AR", color: "#45B7D1", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "Spanish" },
-      { id: "u4", name: "Park Jun", initials: "PJ", color: "#8B7CF6", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "Korean" },
-      { id: "u5", name: "Fatima Ali", initials: "FA", color: "#F7C948", role: "speaker", isMuted: false, isSpeaking: false, nativeLanguage: "Arabic" },
-    ],
-  },
-  {
-    id: "r2", topic: "English Grammar Help", language: "English", languageCode: "en",
-    description: "Ask grammar questions, get corrections, and practice speaking with helpful speakers.",
-    level: "Beginner", tags: ["Grammar", "Q&A"],
-    maxParticipants: 8,
-    participants: [
-      { id: "u6", name: "John Park", initials: "JP", color: "#6BCB77", role: "speaker", isMuted: false, isSpeaking: true, nativeLanguage: "English" },
-      { id: "u7", name: "Yuki Tanaka", initials: "YT", color: "#FF4757", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "Japanese" },
-      { id: "u8", name: "Carlos Lima", initials: "CL", color: "#FF6B9D", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "Portuguese" },
-    ],
-  },
-  {
-    id: "r3", topic: "Business English Practice", language: "English", languageCode: "en",
-    description: "Work on professional vocabulary, presentations, emails, and business small talk.",
-    level: "Intermediate", tags: ["Business", "Professional"],
-    maxParticipants: 10,
-    participants: [
-      { id: "u9", name: "Sophie Martin", initials: "SM", color: "#FF6B35", role: "speaker", isMuted: false, isSpeaking: false, nativeLanguage: "French" },
-      { id: "u10", name: "David Kim", initials: "DK", color: "#4ECDC4", role: "speaker", isMuted: false, isSpeaking: true, nativeLanguage: "Korean" },
-      { id: "u11", name: "Nina Patel", initials: "NP", color: "#45B7D1", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "Hindi" },
-      { id: "u12", name: "Omar Hassan", initials: "OH", color: "#8B7CF6", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "Arabic" },
-      { id: "u13", name: "Emma Weber", initials: "EW", color: "#F7C948", role: "speaker", isMuted: false, isSpeaking: false, nativeLanguage: "German" },
-    ],
-  },
-  {
-    id: "r4", topic: "Spanish for Beginners", language: "Spanish", languageCode: "es",
-    description: "Practice basic Spanish phrases and get help from native speakers.",
-    level: "Beginner", tags: ["Spanish", "Casual"],
-    maxParticipants: 8,
-    participants: [
-      { id: "u14", name: "Isabella Vega", initials: "IV", color: "#6BCB77", role: "speaker", isMuted: false, isSpeaking: true, nativeLanguage: "Spanish" },
-      { id: "u15", name: "Alex Green", initials: "AG", color: "#FF4757", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "English" },
-    ],
-  },
-  {
-    id: "r5", topic: "Japanese Conversation Club", language: "Japanese", languageCode: "ja",
-    description: "Practice your Japanese with native and non-native speakers in a relaxed setting.",
-    level: "Intermediate", tags: ["Japanese", "Anime", "Culture"],
-    maxParticipants: 10,
-    participants: [
-      { id: "u16", name: "Hana Mori", initials: "HM", color: "#FF6B9D", role: "speaker", isMuted: false, isSpeaking: false, nativeLanguage: "Japanese" },
-      { id: "u17", name: "Kevin Liu", initials: "KL", color: "#45B7D1", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "Mandarin" },
-      { id: "u18", name: "Sara Park", initials: "SP", color: "#8B7CF6", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "Korean" },
-    ],
-  },
-  {
-    id: "r6", topic: "Pronunciation Workshop", language: "English", languageCode: "en",
-    description: "Focus on clear pronunciation, accent reduction, and speaking confidence.",
-    level: "All Levels", tags: ["Pronunciation", "Speaking"],
-    maxParticipants: 6,
-    participants: [
-      { id: "u19", name: "Rachel Moore", initials: "RM", color: "#FF6B35", role: "speaker", isMuted: false, isSpeaking: true, nativeLanguage: "English" },
-      { id: "u20", name: "Jin Ho", initials: "JH", color: "#4ECDC4", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "Korean" },
-      { id: "u21", name: "Priya Singh", initials: "PS", color: "#6BCB77", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "Hindi" },
-    ],
-  },
-];
+  if (!room.hostId) {
+    return true;
+  }
 
-// ─── Speaking Pulse ───────────────────────────────────────────────────────────
+  if (room.hostId.startsWith("guest-")) {
+    return true;
+  }
 
-function SpeakingPulse({ color, active }: { color: string; active: boolean }) {
-  const pulse = useRef(new Animated.Value(1)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (active) {
-      const loop = Animated.loop(
-        Animated.parallel([
-          Animated.sequence([
-            Animated.timing(pulse, { toValue: 1.4, duration: 700, useNativeDriver: Platform.OS !== "web" }),
-            Animated.timing(pulse, { toValue: 1, duration: 700, useNativeDriver: Platform.OS !== "web" }),
-          ]),
-          Animated.sequence([
-            Animated.timing(opacity, { toValue: 0.5, duration: 700, useNativeDriver: Platform.OS !== "web" }),
-            Animated.timing(opacity, { toValue: 0, duration: 700, useNativeDriver: Platform.OS !== "web" }),
-          ]),
-        ])
-      );
-      loop.start();
-      return () => { loop.stop(); pulse.setValue(1); opacity.setValue(0); };
-    } else {
-      pulse.setValue(1);
-      opacity.setValue(0);
-    }
-  }, [active]);
-
-  return (
-    <Animated.View
-      style={[
-        StyleSheet.absoluteFillObject,
-        { borderRadius: 40, backgroundColor: color, transform: [{ scale: pulse }], opacity },
-      ]}
-    />
-  );
+  return (room.hostName || "").trim().toLowerCase() === "guest host";
 }
 
-// ─── Participant Tile ─────────────────────────────────────────────────────────
+function filterLegacyDemoRooms(rooms: unknown): VoiceRoom[] {
+  if (!Array.isArray(rooms)) {
+    return [];
+  }
 
-function ParticipantTile({
-  initials, color, name, nativeLang, isSpeaking, isMuted, size = 64,
-}: {
-  initials: string; color: string; name: string; nativeLang: string;
-  isSpeaking: boolean; isMuted: boolean; size?: number;
-}) {
+  return rooms.filter((room): room is VoiceRoom => {
+    if (!room || typeof room !== "object") return false;
+    const candidate = room as VoiceRoom;
+    return Boolean(candidate.id) && !isFakeRoom(candidate);
+  });
+}
+
+function shortenRoomTopic(topic: string, maxLength = 24) {
+  if (topic.length <= maxLength) {
+    return topic;
+  }
+
+  return `${topic.slice(0, maxLength).trimEnd()}...`;
+}
+
+// Styles
+
+function GalaxyBackground() {
   return (
-    <View style={{ width: size + 24, alignItems: "center", gap: 5 }}>
-      <View style={{ width: size, height: size, position: "relative", alignItems: "center", justifyContent: "center" }}>
-        <SpeakingPulse color={color} active={isSpeaking} />
-        <View style={[ptStyles.avatar, { width: size, height: size, borderRadius: size / 2, backgroundColor: color }]}>
-          <Text style={[ptStyles.initials, { fontSize: size * 0.3 }]}>{initials}</Text>
-        </View>
-        {isMuted && !isSpeaking && (
-          <View style={[ptStyles.badge, { backgroundColor: "#555" }]}>
-            <Ionicons name="mic-off" size={9} color="#fff" />
-          </View>
-        )}
-        {isSpeaking && (
-          <View style={[ptStyles.badge, { backgroundColor: color }]}>
-            <Ionicons name="mic" size={9} color="#fff" />
-          </View>
-        )}
-      </View>
-      <Text style={ptStyles.name} numberOfLines={1}>{name.split(" ")[0]}</Text>
-      <Text style={ptStyles.sub} numberOfLines={1}>{nativeLang}</Text>
+    <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: '#0c0a1a', alignItems: 'center', justifyContent: 'center' }}>
+      <Ionicons name="star" size={24} color="rgba(255,255,255,0.2)" style={{ position: 'absolute', top: '20%', left: '20%' }} />
+      <Ionicons name="star" size={16} color="rgba(255,255,255,0.3)" style={{ position: 'absolute', top: '50%', right: '20%' }} />
+      <Ionicons name="star" size={32} color="rgba(255,255,255,0.1)" style={{ position: 'absolute', bottom: '30%', left: '50%' }} />
     </View>
   );
 }
 
-const ptStyles = StyleSheet.create({
-  avatar: { alignItems: "center", justifyContent: "center" },
-  initials: { color: "#fff", fontFamily: "Nunito_700Bold" },
-  badge: {
-    position: "absolute", bottom: 0, right: 0,
-    width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: "#0F1117",
-    alignItems: "center", justifyContent: "center",
-  },
-  name: { color: "#fff", fontFamily: "Nunito_600SemiBold", fontSize: 11, textAlign: "center" },
-  sub: { color: "rgba(255,255,255,0.45)", fontSize: 10, fontFamily: "Nunito_400Regular", textAlign: "center" },
-});
+function RoomBackground({ background }: { background: VoiceRoom['background'] }) {
+  if (background === 'galaxy') {
+    return <GalaxyBackground />;
+  }
 
-// ─── Room Modal (HelloTalk-style) ─────────────────────────────────────────────
-
-function RoomModal({ room, user, onLeave, visible }: {
-  room: VoiceRoom;
-  user: { name: string; email: string } | null;
-  onLeave: () => void;
-  visible: boolean;
-}) {
-  const [isMuted, setIsMuted] = useState(true);
-  const [isRaisedHand, setIsRaisedHand] = useState(false);
-  const [role, setRole] = useState<"listener" | "speaker">("listener");
-  const [showChat, setShowChat] = useState(false);
-  const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<RoomMessage[]>([
-    { id: "c1", sender: "Maria Santos", initials: "MS", color: "#FF6B35", text: "Welcome everyone! Let's introduce ourselves.", ts: Date.now() - 120000 },
-    { id: "c2", sender: "Liam Chen", initials: "LC", color: "#4ECDC4", text: "Hi! I'm from Shanghai. Nice to meet you all!", ts: Date.now() - 80000 },
-    { id: "c3", sender: "Fatima Ali", initials: "FA", color: "#F7C948", text: "Hello! I want to improve my speaking for work.", ts: Date.now() - 30000 },
-  ]);
-  const [participants, setParticipants] = useState<RoomParticipant[]>(room.participants);
-  const chatRef = useRef<ScrollView>(null);
-
-  const lang = LANGUAGES.find(l => l.code === room.languageCode);
-  const langColor = lang?.color || "#FF6B35";
-  const myName = user?.name || "You";
-  const myInitials = makeInitials(myName);
-  const myColor = AVATAR_COLORS[myName.length % AVATAR_COLORS.length];
-
-  const speakers = participants.filter(p => p.role === "speaker");
-  const listeners = participants.filter(p => p.role === "listener");
-
-  useEffect(() => {
-    if (!visible) return;
-    const interval = setInterval(() => {
-      setParticipants(prev => prev.map(p => {
-        if (p.role !== "speaker" || p.isMuted) return { ...p, isSpeaking: false };
-        return { ...p, isSpeaking: Math.random() > 0.5 };
-      }));
-    }, 2800);
-    return () => clearInterval(interval);
-  }, [visible]);
-
-  const handleSendChat = () => {
-    if (!chatInput.trim()) return;
-    const msg: RoomMessage = {
-      id: `c-${Date.now()}`,
-      sender: myName,
-      initials: myInitials,
-      color: myColor,
-      text: chatInput.trim(),
-      ts: Date.now(),
-    };
-    setChatMessages(prev => [...prev, msg]);
-    setChatInput("");
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setTimeout(() => chatRef.current?.scrollToEnd({ animated: true }), 100);
-  };
-
-  const insets = useSafeAreaInsets();
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
-  const botPad = Platform.OS === "web" ? 34 : Math.max(insets.bottom, 16);
-
-  return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
-      <View style={rmStyles.container}>
-        {/* Top bar */}
-        <View style={[rmStyles.topBar, { paddingTop: topPad + 8 }]}>
-          <View style={{ flex: 1 }}>
-            <View style={rmStyles.langRow}>
-              <View style={[rmStyles.dot, { backgroundColor: langColor }]} />
-              <Text style={[rmStyles.langLabel, { color: langColor }]}>{room.language}</Text>
-              <Text style={rmStyles.levelLabel}>{room.level}</Text>
-            </View>
-            <Text style={rmStyles.roomTitle} numberOfLines={2}>{room.topic}</Text>
-          </View>
-          <View style={{ flexDirection: "row", gap: 8, alignItems: "flex-start", marginTop: 4 }}>
-            <Pressable
-              onPress={() => setShowChat(v => !v)}
-              style={[rmStyles.topBtn, showChat && { backgroundColor: langColor + "30" }]}
-            >
-              <Ionicons name="chatbubble-ellipses" size={18} color={showChat ? langColor : "rgba(255,255,255,0.5)"} />
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Live indicator */}
-        <View style={rmStyles.liveBadge}>
-          <View style={rmStyles.liveDot} />
-          <Text style={rmStyles.liveText}>{participants.length} in room</Text>
-          <Text style={rmStyles.separator}>·</Text>
-          <Text style={rmStyles.liveText}>{speakers.length} speakers</Text>
-        </View>
-
-        {/* Main content */}
-        <View style={{ flex: 1, flexDirection: "row" }}>
-          {/* Participant area */}
-          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
-            {/* Speakers */}
-            <View style={rmStyles.section}>
-              <Text style={rmStyles.sectionTitle}>
-                {"  "}SPEAKERS ({speakers.length + (role === "speaker" ? 1 : 0)})
-              </Text>
-              <View style={rmStyles.grid}>
-                {role === "speaker" && (
-                  <ParticipantTile
-                    initials={myInitials} color={myColor} name="You"
-                    nativeLang="Me" isSpeaking={!isMuted} isMuted={isMuted} size={68}
-                  />
-                )}
-                {speakers.map(p => (
-                  <ParticipantTile
-                    key={p.id} initials={p.initials} color={p.color} name={p.name}
-                    nativeLang={p.nativeLanguage} isSpeaking={p.isSpeaking} isMuted={p.isMuted} size={68}
-                  />
-                ))}
-              </View>
-            </View>
-
-            {/* Divider */}
-            <View style={rmStyles.divider} />
-
-            {/* Listeners */}
-            <View style={rmStyles.section}>
-              <Text style={rmStyles.sectionTitle}>
-                {"  "}LISTENERS ({listeners.length + (role === "listener" ? 1 : 0)})
-              </Text>
-              <View style={rmStyles.grid}>
-                {role === "listener" && (
-                  <ParticipantTile
-                    initials={myInitials} color={myColor} name="You"
-                    nativeLang="Me" isSpeaking={false} isMuted size={52}
-                  />
-                )}
-                {listeners.map(p => (
-                  <ParticipantTile
-                    key={p.id} initials={p.initials} color={p.color} name={p.name}
-                    nativeLang={p.nativeLanguage} isSpeaking={false} isMuted={p.isMuted} size={52}
-                  />
-                ))}
-              </View>
-            </View>
-          </ScrollView>
-
-          {/* Chat panel */}
-          {showChat && (
-            <View style={rmStyles.chatPanel}>
-              <Text style={rmStyles.chatTitle}>Chat</Text>
-              <ScrollView
-                ref={chatRef}
-                style={{ flex: 1 }}
-                contentContainerStyle={{ padding: 8, gap: 10 }}
-                showsVerticalScrollIndicator={false}
-              >
-                {chatMessages.map(m => (
-                  <View key={m.id} style={{ flexDirection: "row", gap: 7, marginBottom: 8 }}>
-                    <View style={[rmStyles.chatAvatar, { backgroundColor: m.color }]}>
-                      <Text style={rmStyles.chatAvatarText}>{m.initials}</Text>
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={rmStyles.chatName}>{m.sender.split(" ")[0]}</Text>
-                      <Text style={rmStyles.chatText}>{m.text}</Text>
-                    </View>
-                  </View>
-                ))}
-              </ScrollView>
-              <View style={rmStyles.chatInputRow}>
-                <TextInput
-                  value={chatInput}
-                  onChangeText={setChatInput}
-                  placeholder="Type here..."
-                  placeholderTextColor="rgba(255,255,255,0.3)"
-                  style={rmStyles.chatInput}
-                  onSubmitEditing={handleSendChat}
-                  returnKeyType="send"
-                />
-                <Pressable onPress={handleSendChat} style={[rmStyles.chatSendBtn, { backgroundColor: langColor }]}>
-                  <Ionicons name="arrow-up" size={14} color="#fff" />
-                </Pressable>
-              </View>
-            </View>
-          )}
-        </View>
-
-        {/* Controls */}
-        <View style={[rmStyles.controls, { paddingBottom: botPad }]}>
-          <View style={rmStyles.controlsRow}>
-            {/* Mute */}
-            <View style={rmStyles.ctrlItem}>
-              <Pressable
-                onPress={() => { setIsMuted(v => !v); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }}
-                style={[rmStyles.ctrlBtn, isMuted && { backgroundColor: "#EF4444" }]}
-              >
-                <Ionicons name={isMuted ? "mic-off" : "mic"} size={22} color="#fff" />
-              </Pressable>
-              <Text style={rmStyles.ctrlLabel}>{isMuted ? "Unmute" : "Mute"}</Text>
-            </View>
-
-            {/* Speaker toggle */}
-            <View style={rmStyles.ctrlItem}>
-              <Pressable
-                onPress={() => {
-                  setRole(r => r === "listener" ? "speaker" : "listener");
-                  if (role === "listener") setIsMuted(false);
-                  else setIsMuted(true);
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                }}
-                style={[rmStyles.ctrlBtn, role === "speaker" && { backgroundColor: "#8B7CF6" }]}
-              >
-                <Ionicons name={role === "speaker" ? "mic-circle" : "headset"} size={22} color="#fff" />
-              </Pressable>
-              <Text style={rmStyles.ctrlLabel}>{role === "speaker" ? "Go Listen" : "Speak"}</Text>
-            </View>
-
-            {/* Raise hand */}
-            <View style={rmStyles.ctrlItem}>
-              <Pressable
-                onPress={() => { setIsRaisedHand(v => !v); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
-                style={[rmStyles.ctrlBtn, isRaisedHand && { backgroundColor: "#F7C948" }]}
-              >
-                <Ionicons name="hand-left" size={22} color="#fff" />
-              </Pressable>
-              <Text style={rmStyles.ctrlLabel}>{isRaisedHand ? "Lower" : "Raise"}</Text>
-            </View>
-
-            {/* Leave */}
-            <View style={rmStyles.ctrlItem}>
-              <Pressable
-                onPress={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy); onLeave(); }}
-                style={[rmStyles.ctrlBtn, { backgroundColor: "#EF4444" }]}
-              >
-                <Ionicons name="call" size={22} color="#fff" style={{ transform: [{ rotate: "135deg" }] }} />
-              </Pressable>
-              <Text style={rmStyles.ctrlLabel}>Leave</Text>
-            </View>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
+  return <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: "#2d5a27" }} />;
 }
 
-const rmStyles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0F1117" },
-  topBar: {
-    paddingHorizontal: 20, paddingBottom: 10,
-    flexDirection: "row", alignItems: "flex-start", gap: 12,
-    borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.07)",
+const crStyles = StyleSheet.create({
+  container: { flex: 1 },
+  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: 16 },
+  title: { fontSize: 24, fontFamily: "Nunito_800ExtraBold", textAlign: "center" },
+  label: { fontSize: 12, fontFamily: "Nunito_700Bold", letterSpacing: 0.5, marginBottom: 8 },
+  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 15, fontFamily: "Nunito_400Regular" },
+  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, flexDirection: "row", alignItems: "center", gap: 6 },
+  chipText: { fontSize: 13, fontFamily: "Nunito_600SemiBold" },
+  themeChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, flexDirection: "row", alignItems: "center", gap: 6 },
+  themeChipText: { fontSize: 12, fontFamily: "Nunito_600SemiBold" },
+  bgChip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderWidth: 1, flexDirection: "row", alignItems: "center", gap: 4 },
+  bgChipText: { fontSize: 11, fontFamily: "Nunito_600SemiBold" },
+  preview: { height: 80, borderRadius: 16, alignItems: "center", justifyContent: "center", gap: 8 },
+  bgThumbContainer: { alignItems: 'center', gap: 6, marginRight: 12 },
+  bgThumb: { width: 100, height: 100, borderRadius: 16, overflow: "hidden", borderWidth: 2 },
+  bgThumbSelected: { borderColor: "#4ECDC4", borderWidth: 3 },
+  bgThumbLabel: { fontSize: 12, fontFamily: "Nunito_600SemiBold" },
+  bgThumbOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.1)",
   },
-  langRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  langLabel: { fontSize: 12, fontFamily: "Nunito_700Bold" },
-  levelLabel: { fontSize: 12, color: "rgba(255,255,255,0.35)", fontFamily: "Nunito_400Regular" },
-  roomTitle: { fontSize: 19, fontFamily: "Nunito_800ExtraBold", color: "#fff", lineHeight: 26 },
-  topBtn: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: "rgba(255,255,255,0.08)",
-    alignItems: "center", justifyContent: "center",
-  },
-  liveBadge: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    paddingHorizontal: 20, paddingVertical: 8,
-  },
-  liveDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: "#6BCB77" },
-  liveText: { color: "rgba(255,255,255,0.5)", fontSize: 12, fontFamily: "Nunito_400Regular" },
-  separator: { color: "rgba(255,255,255,0.25)" },
-  section: { paddingHorizontal: 16, paddingTop: 12 },
-  sectionTitle: { color: "rgba(255,255,255,0.35)", fontSize: 11, fontFamily: "Nunito_700Bold", letterSpacing: 1, marginBottom: 14 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 14 },
-  divider: { height: 1, backgroundColor: "rgba(255,255,255,0.07)", marginHorizontal: 16, marginVertical: 10 },
-  chatPanel: { width: 190, borderLeftWidth: 1, borderLeftColor: "rgba(255,255,255,0.07)" },
-  chatTitle: { color: "rgba(255,255,255,0.4)", fontSize: 11, fontFamily: "Nunito_700Bold", letterSpacing: 1, padding: 10 },
-  chatAvatar: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", marginTop: 2 },
-  chatAvatarText: { color: "#fff", fontSize: 10, fontFamily: "Nunito_700Bold" },
-  chatName: { color: "rgba(255,255,255,0.5)", fontSize: 10, fontFamily: "Nunito_600SemiBold", marginBottom: 2 },
-  chatText: { color: "#fff", fontSize: 12, fontFamily: "Nunito_400Regular", lineHeight: 16 },
-  chatInputRow: {
-    flexDirection: "row", alignItems: "center", gap: 6,
-    padding: 8, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.07)",
-  },
-  chatInput: {
-    flex: 1, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: 14,
-    paddingHorizontal: 10, paddingVertical: 7,
-    color: "#fff", fontSize: 12, fontFamily: "Nunito_400Regular",
-  },
-  chatSendBtn: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  controls: {
-    borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.07)",
-    paddingTop: 16, paddingHorizontal: 20,
-  },
-  controlsRow: { flexDirection: "row", justifyContent: "space-around" },
-  ctrlItem: { alignItems: "center", gap: 6 },
-  ctrlBtn: {
-    width: 56, height: 56, borderRadius: 28,
-    backgroundColor: "rgba(255,255,255,0.1)",
-    alignItems: "center", justifyContent: "center",
-  },
-  ctrlLabel: { color: "rgba(255,255,255,0.4)", fontSize: 11, fontFamily: "Nunito_400Regular" },
+  previewText: { color: "#fff", fontSize: 14, fontFamily: "Nunito_600SemiBold" },
+  createBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 16, borderRadius: 16 },
+  createBtnText: { color: "#fff", fontSize: 16, fontFamily: "Nunito_700Bold" },
 });
 
-// ─── Create Room ──────────────────────────────────────────────────────────────
+const rcStyles = StyleSheet.create({
+  card: { borderRadius: 22, borderWidth: 1, padding: 14, gap: 10, overflow: "hidden", shadowColor: "#000", shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.18, shadowRadius: 18, elevation: 8 },
+  glassLayer: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(255,255,255,0.05)" },
+  topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  langRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  langText: { fontSize: 13, fontFamily: "Nunito_700Bold" },
+  levelBadge: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 3, backgroundColor: "rgba(255,255,255,0.12)" },
+  levelText: { fontSize: 11, fontFamily: "Nunito_600SemiBold" },
+  livePill: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "rgba(239,68,68,0.16)", paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: "rgba(239,68,68,0.2)" },
+  liveDotCard: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#EF4444" },
+  liveLabelCard: { color: "#EF4444", fontSize: 10, fontFamily: "Nunito_700Bold" },
+  topic: { fontSize: 16, fontFamily: "Nunito_700Bold", lineHeight: 21 },
+  desc: { fontSize: 12, fontFamily: "Nunito_400Regular", lineHeight: 16 },
+  footer: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  tags: { flexDirection: "row", gap: 6, flex: 1, flexWrap: "wrap" },
+  tag: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.1)" },
+  tagText: { fontSize: 10, fontFamily: "Nunito_600SemiBold" },
+  participants: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, backgroundColor: "rgba(255,255,255,0.08)" },
+  participantsText: { fontSize: 11, fontFamily: "Nunito_600SemiBold" },
+  joinBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 13, paddingVertical: 7, borderRadius: 999, shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.16, shadowRadius: 10, elevation: 5 },
+  joinText: { color: "#fff", fontSize: 13, fontFamily: "Nunito_700Bold" },
+});
 
-function CreateRoomModal({ visible, onClose, onCreated, colors }: {
+const mainStyles = StyleSheet.create({
+  container: { flex: 1 },
+  bgOrbWrap: { ...StyleSheet.absoluteFillObject, overflow: "hidden" },
+  bgOrb: { position: "absolute", borderRadius: 999 },
+  bgOrbOne: { width: 220, height: 220, top: -70, right: -60 },
+  bgOrbTwo: { width: 180, height: 180, top: 180, left: -90 },
+  header: { flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 20, paddingBottom: 12, gap: 12 },
+  title: { fontSize: 30, fontFamily: "Nunito_800ExtraBold", letterSpacing: 0.2 },
+  sub: { fontSize: 12, fontFamily: "Nunito_400Regular", marginTop: 3 },
+  mutualStrip: { paddingHorizontal: 20, paddingBottom: 14, gap: 10 },
+  mutualHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  mutualTitle: { fontSize: 14, fontFamily: "Nunito_800ExtraBold" },
+  mutualSubtitle: { fontSize: 12, fontFamily: "Nunito_600SemiBold" },
+  mutualList: { paddingRight: 20, gap: 12 },
+  mutualBubble: {
+    width: 86,
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.16,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  mutualAvatarWrap: { position: "relative", marginTop: 2 },
+  mutualAvatar: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center", borderWidth: 2 },
+  mutualAvatarText: { color: "#fff", fontSize: 16, fontFamily: "Nunito_800ExtraBold" },
+  mutualOnlineRing: { position: "absolute", top: -4, right: -4, bottom: -4, left: -4, borderRadius: 28, borderWidth: 1.5 },
+  mutualOnlineDot: { position: "absolute", right: 1, bottom: 1, width: 12, height: 12, borderRadius: 6, borderWidth: 2 },
+  mutualName: { fontSize: 11, fontFamily: "Nunito_700Bold", textAlign: "center" },
+  newBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, marginTop: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.16, shadowRadius: 12, elevation: 5 },
+  newBtnText: { color: "#fff", fontSize: 13, fontFamily: "Nunito_700Bold" },
+  filterRow: { paddingHorizontal: 16, gap: 8, paddingBottom: 12, maxHeight: 60 },
+  chip: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, borderWidth: 1 },
+  chipDot: { width: 7, height: 7, borderRadius: 3.5 },
+  chipText: { fontSize: 13, fontFamily: "Nunito_600SemiBold" },
+  list: { padding: 16, gap: 12, paddingBottom: 30 },
+  empty: { alignItems: "center", paddingVertical: 60, gap: 12 },
+  emptyText: { fontSize: 14, fontFamily: "Nunito_400Regular" },
+  emptyBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, marginTop: 4 },
+  emptyBtnText: { color: "#fff", fontSize: 14, fontFamily: "Nunito_700Bold" },
+});
+
+function CreateRoomModal({ visible, onClose, onCreated, colors, user }: {
   visible: boolean;
   onClose: () => void;
   onCreated: (room: VoiceRoom) => void;
   colors: typeof Colors.dark;
+  user: User | null;
 }) {
   const [topic, setTopic] = useState("");
   const [langCode, setLangCode] = useState("en");
   const [level, setLevel] = useState<VoiceRoom["level"]>("All Levels");
+  const [theme, setTheme] = useState<VoiceRoom["theme"]>("make_friends");
+  const [background, setBackground] = useState<VoiceRoom["background"]>("galaxy");
+  
   const levels: VoiceRoom["level"][] = ["All Levels", "Beginner", "Intermediate", "Advanced"];
   const selLang = LANGUAGES.find(l => l.code === langCode) || LANGUAGES[0];
+  const selTheme = ROOM_THEMES.find(t => t.id === theme) || ROOM_THEMES[0];
+  const selBg = BACKGROUND_OPTIONS.find(b => b.id === background);
+
+  const handleThemeChange = (newTheme: VoiceRoom["theme"]) => {
+    setTheme(newTheme);
+    // Suggest a background based on theme
+    switch (newTheme) {
+      case 'music': setBackground('galaxy'); break;
+      case 'culture': setBackground('earth'); break;
+      case 'make_friends': setBackground('summer'); break;
+      case 'oral_practice': setBackground('spring'); break;
+      case 'chat': setBackground('rose'); break;
+      default: setBackground('galaxy');
+    }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
 
   const handleCreate = () => {
     if (!topic.trim()) return;
+    if (!user?.id || !user.displayName.trim()) return;
+    const hostId = user.id;
+    const hostName = user.displayName;
     const room: VoiceRoom = {
       id: `r-${Date.now()}`,
       topic: topic.trim(),
@@ -530,18 +248,42 @@ function CreateRoomModal({ visible, onClose, onCreated, colors }: {
       languageCode: langCode,
       description: "A new room — join and start talking!",
       level,
-      tags: [selLang.name, level],
-      maxParticipants: 10,
+      tags: [selLang.name, level, theme],
       participants: [],
+      theme,
+      background,
+      hostId,
+      hostName,
+      hostInitials: makeInitials(hostName),
+      hostColor: user?.avatarColor || selTheme.color,
+      hostAvatarUri: user?.avatarUri,
+      speakerRequests: [],
     };
     onCreated(room);
     setTopic("");
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setTheme("make_friends");
+    setBackground("galaxy");
+  };
+
+  const renderBackgroundContent = (bgId: string) => {
+    switch (bgId) {
+      case 'galaxy': return <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#0c0a1a' }]}><Ionicons name="star" size={12} color="rgba(255,255,255,0.2)" style={{ position: 'absolute', top: '20%', left: '20%' }} /><Ionicons name="star" size={8} color="rgba(255,255,255,0.3)" style={{ position: 'absolute', top: '50%', right: '20%' }} /></View>;
+      case 'rose': return <Image source={{ uri: 'https://images.unsplash.com/photo-1496857239036-1fb137683000?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#e11d48' }]} resizeMode="cover" />;
+      case 'earth': return <Image source={{ uri: 'https://images.unsplash.com/photo-1614730341194-75c60740a2d3?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#2563eb' }]} resizeMode="cover" />;
+      case 'sunflower': return <Image source={{ uri: 'https://images.unsplash.com/photo-1597848212624-a19eb35e2651?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#f59e0b' }]} resizeMode="cover" />;
+      case 'spring': return <Image source={{ uri: 'https://images.unsplash.com/photo-1522748906645-95d8adfd52c7?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#4ade80' }]} resizeMode="cover" />;
+      case 'summer': return <Image source={{ uri: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#facc15' }]} resizeMode="cover" />;
+      case 'autumn': return <Image source={{ uri: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#fb923c' }]} resizeMode="cover" />;
+      case 'winter': return <Image source={{ uri: 'https://images.unsplash.com/photo-1457269449834-928af6406ed3?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#60a5fa' }]} resizeMode="cover" />;
+      case 'sari_sari': return <Image source={{ uri: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#eab308' }]} resizeMode="cover" />;
+      case 'mario': return <Image source={{ uri: 'https://images.unsplash.com/photo-1612287230217-969e2614d601?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#ef4444' }]} resizeMode="cover" />;
+      default: return null;
+    }
   };
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="formSheet" onRequestClose={onClose}>
-      <View style={[crStyles.container, { backgroundColor: colors.background }]}>
+      <ScrollView style={[crStyles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ padding: 24, gap: 16 }}>
         <View style={[crStyles.handle, { backgroundColor: colors.border }]} />
         <Text style={[crStyles.title, { color: colors.text }]}>Create a Room</Text>
 
@@ -563,15 +305,10 @@ function CreateRoomModal({ visible, onClose, onCreated, colors }: {
               onPress={() => setLangCode(l.code)}
               style={[
                 crStyles.chip,
-                {
-                  backgroundColor: langCode === l.code ? l.color + "20" : colors.card,
-                  borderColor: langCode === l.code ? l.color : colors.border,
-                },
+                { backgroundColor: langCode === l.code ? l.color + "20" : colors.card, borderColor: langCode === l.code ? l.color : colors.border },
               ]}
             >
-              <Text style={[crStyles.chipText, { color: langCode === l.code ? l.color : colors.text }]}>
-                {l.name}
-              </Text>
+              <Text style={[crStyles.chipText, { color: langCode === l.code ? l.color : colors.text }]}>{l.name}</Text>
             </Pressable>
           ))}
         </ScrollView>
@@ -584,126 +321,148 @@ function CreateRoomModal({ visible, onClose, onCreated, colors }: {
               onPress={() => setLevel(lv)}
               style={[
                 crStyles.chip,
-                {
-                  backgroundColor: level === lv ? selLang.color + "20" : colors.card,
-                  borderColor: level === lv ? selLang.color : colors.border,
-                },
+                { backgroundColor: level === lv ? selLang.color + "20" : colors.card, borderColor: level === lv ? selLang.color : colors.border },
               ]}
             >
-              <Text style={[crStyles.chipText, { color: level === lv ? selLang.color : colors.text }]}>
-                {lv}
-              </Text>
+              <Text style={[crStyles.chipText, { color: level === lv ? selLang.color : colors.text }]}>{lv}</Text>
             </Pressable>
           ))}
         </View>
 
+        <Text style={[crStyles.label, { color: colors.muted }]}>ROOM THEME</Text>
+        <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+          {ROOM_THEMES.map(t => (
+            <Pressable
+              key={t.id}
+              onPress={() => handleThemeChange(t.id as VoiceRoom["theme"])}
+              style={[
+                crStyles.themeChip,
+                { backgroundColor: theme === t.id ? t.color + "20" : colors.card, borderColor: theme === t.id ? t.color : colors.border },
+              ]}
+            >
+              <Ionicons name={t.icon} size={16} color={theme === t.id ? t.color : colors.muted} />
+              <Text style={[crStyles.themeChipText, { color: theme === t.id ? t.color : colors.text }]}>{t.name}</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <Text style={[crStyles.label, { color: colors.muted }]}>BACKGROUND</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 4 }}>
+          {BACKGROUND_OPTIONS.map(bg => (
+            <View key={bg.id} style={crStyles.bgThumbContainer}>
+              <Pressable
+                onPress={() => setBackground(bg.id as VoiceRoom["background"])}
+                style={[
+                  crStyles.bgThumb,
+                  { borderColor: background === bg.id ? colors.primary : "transparent" },
+                  background === bg.id && crStyles.bgThumbSelected
+                ]}
+              >
+                {renderBackgroundContent(bg.id)}
+                {background === bg.id && <View style={crStyles.bgThumbOverlay} />}
+              </Pressable>
+              <Text style={[crStyles.bgThumbLabel, { color: background === bg.id ? colors.primary : colors.text }]}>{bg.name}</Text>
+            </View>
+          ))}
+        </ScrollView>
+
         <Pressable
           onPress={handleCreate}
-          disabled={!topic.trim()}
-          style={({ pressed }) => [
-            crStyles.createBtn,
-            { backgroundColor: topic.trim() ? selLang.color : colors.border, opacity: pressed ? 0.85 : 1 },
-          ]}
+          disabled={!topic.trim() || !user}
+          style={({ pressed }) => [crStyles.createBtn, { backgroundColor: topic.trim() && user ? selTheme.color : colors.border, opacity: pressed ? 0.85 : 1 }]}
         >
           <Ionicons name="mic-circle" size={20} color="#fff" />
-          <Text style={crStyles.createBtnText}>Start Room</Text>
+          <Text style={crStyles.createBtnText}>{user ? "Start Room" : "Sign in to create"}</Text>
         </Pressable>
-      </View>
+      </ScrollView>
     </Modal>
   );
 }
-
-const crStyles = StyleSheet.create({
-  container: { flex: 1, padding: 24, gap: 14 },
-  handle: { width: 36, height: 4, borderRadius: 2, alignSelf: "center", marginBottom: 4 },
-  title: { fontSize: 22, fontFamily: "Nunito_800ExtraBold" },
-  label: { fontSize: 11, fontFamily: "Nunito_700Bold", letterSpacing: 1 },
-  input: {
-    borderRadius: 12, borderWidth: 1,
-    paddingHorizontal: 14, paddingVertical: 12,
-    fontSize: 15, fontFamily: "Nunito_400Regular",
-  },
-  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
-  chipText: { fontSize: 13, fontFamily: "Nunito_600SemiBold" },
-  createBtn: {
-    flexDirection: "row", alignItems: "center", justifyContent: "center",
-    gap: 8, padding: 16, borderRadius: 14, marginTop: 8,
-  },
-  createBtnText: { color: "#fff", fontSize: 16, fontFamily: "Nunito_700Bold" },
-});
-
-// ─── Room Card ────────────────────────────────────────────────────────────────
 
 function RoomCard({ room, onJoin, colors }: {
   room: VoiceRoom; onJoin: () => void; colors: typeof Colors.dark;
 }) {
   const lang = LANGUAGES.find(l => l.code === room.languageCode);
   const langColor = lang?.color || "#FF6B35";
-  const speakers = room.participants.filter(p => p.role === "speaker");
-  const speakingNow = room.participants.some(p => p.isSpeaking);
+  const participantCount = room.participants?.length || 0;
+
+  const getBackgroundElement = () => {
+    switch (room.background) {
+      case 'galaxy':
+        return (
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#0c0a1a' }]}>
+            <Ionicons name="star" size={12} color="rgba(255,255,255,0.2)" style={{ position: 'absolute', top: '20%', left: '20%' }} />
+            <Ionicons name="star" size={8} color="rgba(255,255,255,0.3)" style={{ position: 'absolute', top: '50%', right: '20%' }} />
+          </View>
+        );
+      case 'rose':
+        return <Image source={{ uri: 'https://images.unsplash.com/photo-1496857239036-1fb137683000?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#e11d48' }]} resizeMode="cover" />;
+      case 'earth':
+        return <Image source={{ uri: 'https://images.unsplash.com/photo-1614730341194-75c60740a2d3?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#2563eb' }]} resizeMode="cover" />;
+      case 'sunflower':
+        return <Image source={{ uri: 'https://images.unsplash.com/photo-1597848212624-a19eb35e2651?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#f59e0b' }]} resizeMode="cover" />;
+      case 'spring':
+        return <Image source={{ uri: 'https://images.unsplash.com/photo-1522748906645-95d8adfd52c7?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#4ade80' }]} resizeMode="cover" />;
+      case 'summer':
+        return <Image source={{ uri: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#facc15' }]} resizeMode="cover" />;
+      case 'autumn':
+        return <Image source={{ uri: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#fb923c' }]} resizeMode="cover" />;
+      case 'winter':
+        return <Image source={{ uri: 'https://images.unsplash.com/photo-1457269449834-928af6406ed3?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#60a5fa' }]} resizeMode="cover" />;
+      case 'sari_sari':
+        return <Image source={{ uri: 'https://images.unsplash.com/photo-1555396273-367ea4eb4db5?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#eab308' }]} resizeMode="cover" />;
+      case 'mario':
+        return <Image source={{ uri: 'https://images.unsplash.com/photo-1612287230217-969e2614d601?q=80&w=1000&auto=format&fit=crop' }} style={[StyleSheet.absoluteFillObject, { backgroundColor: '#ef4444' }]} resizeMode="cover" />;
+      default: return null;
+    }
+  };
+
+  const bgElement = getBackgroundElement();
+  const textColor = bgElement ? "#fff" : colors.text;
+  const subTextColor = bgElement ? "rgba(255,255,255,0.8)" : colors.muted;
 
   return (
     <Pressable
       onPress={onJoin}
       style={({ pressed }) => [
         rcStyles.card,
-        { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.93 : 1 },
+        { backgroundColor: bgElement ? "transparent" : colors.card, borderColor: bgElement ? "transparent" : colors.border, opacity: pressed ? 0.93 : 1, overflow: "hidden" }
       ]}
     >
+      {bgElement}
+      {bgElement && <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />}
+      <View style={rcStyles.glassLayer} />
+
       <View style={rcStyles.topRow}>
         <View style={rcStyles.langRow}>
           <View style={[rcStyles.dot, { backgroundColor: langColor }]} />
           <Text style={[rcStyles.langText, { color: langColor }]}>{room.language}</Text>
-          <View style={[rcStyles.levelBadge, { borderColor: colors.border }]}>
-            <Text style={[rcStyles.levelText, { color: colors.muted }]}>{room.level}</Text>
+          <View style={[rcStyles.levelBadge, { borderColor: bgElement ? "rgba(255,255,255,0.3)" : colors.border }]}>
+            <Text style={[rcStyles.levelText, { color: subTextColor }]}>{room.level}</Text>
           </View>
         </View>
-        {speakingNow && (
-          <View style={rcStyles.livePill}>
-            <View style={rcStyles.liveDotCard} />
-            <Text style={rcStyles.liveLabelCard}>LIVE</Text>
-          </View>
-        )}
+        <View style={rcStyles.livePill}>
+          <View style={rcStyles.liveDotCard} />
+          <Text style={rcStyles.liveLabelCard}>LIVE</Text>
+        </View>
       </View>
 
-      <Text style={[rcStyles.topic, { color: colors.text }]}>{room.topic}</Text>
-      <Text style={[rcStyles.desc, { color: colors.muted }]} numberOfLines={2}>{room.description}</Text>
-
-      <View style={rcStyles.avatarRow}>
-        {room.participants.slice(0, 5).map((p, i) => (
-          <View
-            key={p.id}
-            style={[
-              rcStyles.avatar,
-              {
-                backgroundColor: p.color,
-                borderColor: colors.background,
-                marginLeft: i > 0 ? -10 : 0,
-                zIndex: 5 - i,
-              },
-              p.isSpeaking && { borderColor: p.color, borderWidth: 2.5 },
-            ]}
-          >
-            <Text style={rcStyles.avatarText}>{p.initials}</Text>
-          </View>
-        ))}
-        {room.participants.length > 5 && (
-          <View style={[rcStyles.avatar, { backgroundColor: colors.border, borderColor: colors.background, marginLeft: -10, zIndex: 0 }]}>
-            <Text style={[rcStyles.avatarText, { color: colors.muted }]}>+{room.participants.length - 5}</Text>
-          </View>
-        )}
-        <Text style={[rcStyles.count, { color: colors.muted }]}>
-          {room.participants.length}/{room.maxParticipants}
-        </Text>
-      </View>
+      <Text style={[rcStyles.topic, { color: textColor }]} numberOfLines={1}>
+        {shortenRoomTopic(room.topic)}
+      </Text>
+      <Text style={[rcStyles.desc, { color: subTextColor }]} numberOfLines={2}>{room.description}</Text>
 
       <View style={rcStyles.footer}>
         <View style={rcStyles.tags}>
-          {room.tags.map(t => (
-            <View key={t} style={[rcStyles.tag, { backgroundColor: langColor + "18" }]}>
+          {room.tags.slice(0, 3).map(t => (
+            <View key={t} style={[rcStyles.tag, { backgroundColor: langColor + "25" }]}>
               <Text style={[rcStyles.tagText, { color: langColor }]}>{t}</Text>
             </View>
           ))}
+        </View>
+        <View style={rcStyles.participants}>
+          <Ionicons name="people" size={14} color={subTextColor} />
+          <Text style={[rcStyles.participantsText, { color: subTextColor }]}>{participantCount} online</Text>
         </View>
         <Pressable onPress={onJoin} style={[rcStyles.joinBtn, { backgroundColor: langColor }]}>
           <Ionicons name="enter" size={14} color="#fff" />
@@ -714,61 +473,302 @@ function RoomCard({ room, onJoin, colors }: {
   );
 }
 
-const rcStyles = StyleSheet.create({
-  card: { borderRadius: 16, borderWidth: 1, padding: 16, gap: 10 },
-  topRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  langRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  langText: { fontSize: 13, fontFamily: "Nunito_700Bold" },
-  levelBadge: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
-  levelText: { fontSize: 11, fontFamily: "Nunito_600SemiBold" },
-  livePill: { flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#EF444422", paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  liveDotCard: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#EF4444" },
-  liveLabelCard: { color: "#EF4444", fontSize: 10, fontFamily: "Nunito_700Bold" },
-  topic: { fontSize: 16, fontFamily: "Nunito_700Bold", lineHeight: 22 },
-  desc: { fontSize: 13, fontFamily: "Nunito_400Regular", lineHeight: 18 },
-  avatarRow: { flexDirection: "row", alignItems: "center" },
-  avatar: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", borderWidth: 2 },
-  avatarText: { color: "#fff", fontSize: 11, fontFamily: "Nunito_700Bold" },
-  count: { marginLeft: 10, fontSize: 12, fontFamily: "Nunito_400Regular" },
-  footer: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  tags: { flexDirection: "row", gap: 6, flex: 1, flexWrap: "wrap" },
-  tag: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 },
-  tagText: { fontSize: 11, fontFamily: "Nunito_600SemiBold" },
-  joinBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-  joinText: { color: "#fff", fontSize: 13, fontFamily: "Nunito_700Bold" },
-});
-
-// ─── Main Screen ──────────────────────────────────────────────────────────────
-
 export default function VoiceScreen() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-
-  const [rooms, setRooms] = useState<VoiceRoom[]>(SAMPLE_ROOMS);
+  
+  const [rooms, setRooms] = useState<VoiceRoom[]>([]);
+  const [knownUsers, setKnownUsers] = useState<User[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [activeRoom, setActiveRoom] = useState<VoiceRoom | null>(null);
+  const [minimizedRoom, setMinimizedRoom] = useState<VoiceRoom | null>(null);
   const [filterLang, setFilterLang] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [usingApiFallback, setUsingApiFallback] = useState(false);
+  const lobbySocketRef = useRef<WebSocket | null>(null);
+
+  const loadRooms = async () => {
+    try {
+      const response = await apiRequest("GET", "/api/voice-rooms");
+      const nextRooms = filterLegacyDemoRooms(await response.json());
+      setRooms(nextRooms);
+      setUsingApiFallback(false);
+      return;
+    } catch (error) {
+      console.warn("Falling back to local room storage:", error);
+    }
+
+    try {
+      const storedRooms = await AsyncStorage.getItem(ROOMS_KEY);
+      if (storedRooms) {
+        const parsed = JSON.parse(storedRooms);
+        const nextRooms = filterLegacyDemoRooms(parsed);
+        if (nextRooms.length > 0) {
+          setRooms(nextRooms);
+          setUsingApiFallback(true);
+          await AsyncStorage.setItem(ROOMS_KEY, JSON.stringify(nextRooms));
+          return;
+        }
+      }
+
+      setRooms([]);
+      setUsingApiFallback(true);
+      await AsyncStorage.setItem(ROOMS_KEY, JSON.stringify([]));
+    } catch (e) {
+      console.error("Failed to load rooms:", e);
+      setRooms([]);
+      setUsingApiFallback(true);
+    }
+  };
+
+  const loadKnownUsers = async () => {
+    try {
+      const storedUsers = await AsyncStorage.getItem(USERS_KEY);
+      if (!storedUsers) {
+        setKnownUsers([]);
+        return;
+      }
+
+      setKnownUsers(JSON.parse(storedUsers) as User[]);
+    } catch (error) {
+      console.error("Failed to load users:", error);
+      setKnownUsers([]);
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const bootstrap = async () => {
+      await Promise.all([loadRooms(), loadKnownUsers()]);
+      if (isMounted) {
+        setIsLoading(false);
+      }
+    };
+
+    bootstrap();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isLoading || usingApiFallback) {
+      lobbySocketRef.current?.close();
+      lobbySocketRef.current = null;
+      return;
+    }
+
+    const baseUrl = new URL(getApiUrl());
+    const wsProtocol = baseUrl.protocol === "https:" ? "wss:" : "ws:";
+    const socket = new WebSocket(`${wsProtocol}//${baseUrl.host}/api/voice-rooms/live`);
+    lobbySocketRef.current = socket;
+
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ type: "subscribe:lobby" }));
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data as string) as
+          | { type: "rooms:snapshot"; rooms: VoiceRoom[] }
+          | { type: "room:snapshot"; room: VoiceRoom }
+          | { type: "room:deleted"; roomId: string };
+
+        if (message.type === "rooms:snapshot") {
+          setRooms(filterLegacyDemoRooms(message.rooms));
+          return;
+        }
+
+        if (message.type === "room:snapshot") {
+          setRooms((current) => {
+            const nextRoom = message.room;
+            const existing = current.find((room) => room.id === nextRoom.id);
+            const nextRooms = existing
+              ? current.map((room) => (room.id === nextRoom.id ? nextRoom : room))
+              : [nextRoom, ...current];
+            return filterLegacyDemoRooms(nextRooms);
+          });
+          return;
+        }
+
+        if (message.type === "room:deleted") {
+          setRooms((current) => current.filter((room) => room.id !== message.roomId));
+        }
+      } catch (error) {
+        console.error("Voice lobby realtime client error:", error);
+      }
+    };
+
+    socket.onerror = () => {
+      console.warn("Voice lobby realtime connection failed; keeping last room snapshot.");
+    };
+
+    return () => {
+      socket.close();
+      if (lobbySocketRef.current === socket) {
+        lobbySocketRef.current = null;
+      }
+    };
+  }, [isLoading, usingApiFallback]);
+
+  const handleUpdateRoom = (updatedRoom: VoiceRoom) => {
+    const nextRooms = rooms.map(r => r.id === updatedRoom.id ? updatedRoom : r);
+    setRooms(nextRooms);
+    setActiveRoom(updatedRoom);
+    if (!usingApiFallback) {
+      apiRequest("PUT", `/api/voice-rooms/${updatedRoom.id}`, updatedRoom).catch((error) => {
+        console.error("Failed to sync room update:", error);
+      });
+      return;
+    }
+
+    AsyncStorage.setItem(
+      ROOMS_KEY,
+      JSON.stringify(nextRooms),
+    ).catch((error) => console.error("Failed to persist room update:", error));
+  };
+
+  const handleDeleteRoomLocally = async (roomId: string) => {
+    const nextRooms = rooms.filter((room) => room.id !== roomId);
+    setRooms(nextRooms);
+    setActiveRoom((current) => (current?.id === roomId ? null : current));
+    setMinimizedRoom((current) => (current?.id === roomId ? null : current));
+
+    if (usingApiFallback) {
+      await AsyncStorage.setItem(ROOMS_KEY, JSON.stringify(nextRooms));
+    }
+  };
+
+  const handleLeaveRoom = async (room: VoiceRoom) => {
+    const currentUserId = user?.id || "me";
+    const isHost = (room.hostId || room.participants[0]?.id || currentUserId) === currentUserId;
+
+    if (isHost) {
+      try {
+        if (!usingApiFallback) {
+          await apiRequest("DELETE", `/api/voice-rooms/${room.id}`);
+        }
+        await handleDeleteRoomLocally(room.id);
+      } catch (error) {
+        console.error("Failed to end room:", error);
+      }
+      return;
+    }
+
+    const updatedRoom = {
+      ...room,
+      participants: room.participants.filter((participant) => participant.id !== currentUserId),
+      speakerRequests: (room.speakerRequests || []).filter((request) => request.userId !== currentUserId),
+    };
+
+    setActiveRoom(null);
+    setMinimizedRoom(null);
+
+    if (!usingApiFallback) {
+      apiRequest("PUT", `/api/voice-rooms/${room.id}`, updatedRoom).catch((error) => {
+        console.error("Failed to leave room:", error);
+      });
+      setRooms((current) => current.map((item) => (item.id === room.id ? updatedRoom : item)));
+      return;
+    }
+
+    const nextRooms = rooms.map((item) => (item.id === room.id ? updatedRoom : item));
+    setRooms(nextRooms);
+    AsyncStorage.setItem(ROOMS_KEY, JSON.stringify(nextRooms)).catch((error) => {
+      console.error("Failed to persist room leave:", error);
+    });
+  };
+
+  const handleCreateRoom = async (newRoom: VoiceRoom) => {
+    if (!usingApiFallback) {
+      const response = await apiRequest("POST", "/api/voice-rooms", newRoom);
+      const createdRoom = (await response.json()) as VoiceRoom;
+      setRooms(prev => [createdRoom, ...prev.filter(room => room.id !== createdRoom.id)]);
+      setShowCreate(false);
+      setActiveRoom(createdRoom);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      return;
+    }
+
+    const newRooms = [newRoom, ...rooms];
+    setRooms(newRooms);
+    await AsyncStorage.setItem(ROOMS_KEY, JSON.stringify(newRooms));
+    setShowCreate(false);
+    setActiveRoom(newRoom);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
 
-  const filteredRooms = filterLang
-    ? rooms.filter(r => r.languageCode === filterLang)
-    : rooms;
+  const roomsForDisplay = rooms;
+  const filteredRooms = filterLang ? roomsForDisplay.filter(r => r.languageCode === filterLang) : roomsForDisplay;
+  const langCodes = Array.from(new Set(roomsForDisplay.map(r => r.languageCode)));
+  const onlineMutualHosts = useMemo(() => {
+    const currentUserId = user?.id;
+    const seen = new Set<string>();
 
-  const langCodes = Array.from(new Set(rooms.map(r => r.languageCode)));
+    return roomsForDisplay
+      .filter((room) => room.hostId && room.hostId !== currentUserId)
+      .map((room) => {
+        const hostUser = knownUsers.find((candidate) => candidate.id === room.hostId);
+        const hostName = room.hostName || hostUser?.displayName || room.participants[0]?.name || room.language;
+
+        return {
+          id: room.hostId || room.id,
+          roomId: room.id,
+          name: hostName,
+          color: room.hostColor || hostUser?.avatarColor || room.participants[0]?.color || "#4ECDC4",
+          avatarUri: room.hostAvatarUri || hostUser?.avatarUri || room.participants[0]?.avatarUri,
+          initials: room.hostInitials || makeInitials(hostName),
+        };
+      })
+      .filter((host) => {
+        if (seen.has(host.id)) {
+          return false;
+        }
+
+        seen.add(host.id);
+        return true;
+      })
+      .slice(0, 8);
+  }, [knownUsers, roomsForDisplay, user?.id]);
+
+  useEffect(() => {
+    if (activeRoom) {
+      const syncedActiveRoom = roomsForDisplay.find((room) => room.id === activeRoom.id);
+      if (syncedActiveRoom) {
+        setActiveRoom(syncedActiveRoom);
+      } else {
+        setActiveRoom(null);
+      }
+    }
+
+    if (minimizedRoom) {
+      const syncedMinimizedRoom = roomsForDisplay.find((room) => room.id === minimizedRoom.id);
+      if (syncedMinimizedRoom) {
+        setMinimizedRoom(syncedMinimizedRoom);
+      } else {
+        setMinimizedRoom(null);
+      }
+    }
+  }, [activeRoom, minimizedRoom, roomsForDisplay]);
 
   return (
     <View style={[mainStyles.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
+      <ScreenBackdrop
+        primaryColor={colors.primary + "16"}
+        secondaryColor={colors.gold + "12"}
+      />
       <View style={[mainStyles.header, { paddingTop: topInset + 12 }]}>
         <View style={{ flex: 1 }}>
           <Text style={[mainStyles.title, { color: colors.text }]}>Voice Rooms</Text>
           <Text style={[mainStyles.sub, { color: colors.muted }]}>
-            {rooms.length} live rooms · practice speaking
+            {roomsForDisplay.length} rooms · practice speaking
           </Text>
         </View>
         <Pressable
@@ -780,11 +780,53 @@ export default function VoiceScreen() {
         </Pressable>
       </View>
 
-      {/* Filter bar */}
-      <ScrollView
-        horizontal showsHorizontalScrollIndicator={false}
-        contentContainerStyle={mainStyles.filterRow}
-      >
+      {onlineMutualHosts.length > 0 && (
+        <View style={mainStyles.mutualStrip}>
+          <View style={mainStyles.mutualHeader}>
+            <Text style={[mainStyles.mutualTitle, { color: colors.text }]}>Mutuals in voice rooms</Text>
+            <Text style={[mainStyles.mutualSubtitle, { color: colors.muted }]}>online now</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={mainStyles.mutualList}>
+            {onlineMutualHosts.map((host) => (
+              <Pressable
+                key={host.id}
+                onPress={() => {
+                  const selectedRoom = roomsForDisplay.find((room) => room.id === host.roomId);
+                  if (selectedRoom) {
+                    setActiveRoom(selectedRoom);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }
+                }}
+                style={[
+                  mainStyles.mutualBubble,
+                  {
+                    backgroundColor: colors.card + "CC",
+                    borderColor: colors.border + "A0",
+                  },
+                ]}
+              >
+                <View style={mainStyles.mutualAvatarWrap}>
+                  <View style={[mainStyles.mutualOnlineRing, { borderColor: colors.mint + "66" }]} />
+                  {host.avatarUri ? (
+                    <Image source={{ uri: host.avatarUri }} style={[mainStyles.mutualAvatar, { borderColor: colors.background }]} />
+                  ) : (
+                    <View style={[mainStyles.mutualAvatar, { backgroundColor: host.color, borderColor: colors.background }]}>
+                      <Text style={mainStyles.mutualAvatarText}>{host.initials}</Text>
+                    </View>
+                  )}
+                  <View style={[mainStyles.mutualOnlineDot, { backgroundColor: colors.mint, borderColor: colors.background }]} />
+                </View>
+                <Text style={[mainStyles.mutualName, { color: colors.text }]} numberOfLines={1}>
+                  {host.name}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      <View style={{ height: 60 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={mainStyles.filterRow}>
         {["all", ...langCodes].map(code => {
           const isAll = code === "all";
           const lang = LANGUAGES.find(l => l.code === code);
@@ -794,89 +836,77 @@ export default function VoiceScreen() {
             <Pressable
               key={code}
               onPress={() => setFilterLang(isAll ? null : code)}
-              style={[
-                mainStyles.chip,
-                {
-                  backgroundColor: selected ? color : colors.card,
-                  borderColor: selected ? color : colors.border,
-                },
-              ]}
+              style={[mainStyles.chip, { backgroundColor: selected ? color : colors.card, borderColor: selected ? color : colors.border }]}
             >
               {!isAll && <View style={[mainStyles.chipDot, { backgroundColor: selected ? "#fff" : color }]} />}
-              <Text style={[mainStyles.chipText, { color: selected ? "#fff" : colors.text }]}>
-                {isAll ? "All" : lang?.name || code}
-              </Text>
+              <Text style={[mainStyles.chipText, { color: selected ? "#fff" : colors.text }]}>{isAll ? "All" : lang?.name || code}</Text>
             </Pressable>
           );
         })}
       </ScrollView>
+      </View>
 
-      {/* Room list */}
-      <FlatList
-        data={filteredRooms}
-        keyExtractor={r => r.id}
-        renderItem={({ item }) => (
-          <RoomCard
-            room={item}
-            onJoin={() => { setActiveRoom(item); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }}
-            colors={colors}
-          />
-        )}
-        contentContainerStyle={mainStyles.list}
-        showsVerticalScrollIndicator={false}
-        ListEmptyComponent={
-          <View style={mainStyles.empty}>
-            <Ionicons name="mic-circle-outline" size={40} color={colors.muted} />
-            <Text style={[mainStyles.emptyText, { color: colors.muted }]}>No rooms for this language.</Text>
-            <Pressable
-              onPress={() => setShowCreate(true)}
-              style={[mainStyles.emptyBtn, { backgroundColor: colors.primary }]}
-            >
-              <Text style={mainStyles.emptyBtnText}>Create the first one</Text>
-            </Pressable>
-          </View>
-        }
-      />
+      {isLoading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <ActivityIndicator color={colors.primary} size="large" />
+        </View>
+      ) : (
+        <FlatList
+          data={filteredRooms}
+          keyExtractor={r => r.id}
+          renderItem={({ item }) => (
+            <RoomCard room={item} onJoin={() => { setActiveRoom(item); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); }} colors={colors} />
+          )}
+          contentContainerStyle={mainStyles.list}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={mainStyles.empty}>
+              <Ionicons name="mic-circle-outline" size={40} color={colors.muted} />
+              <Text style={[mainStyles.emptyText, { color: colors.muted }]}>No rooms yet. Create one!</Text>
+              <Pressable onPress={() => setShowCreate(true)} style={[mainStyles.emptyBtn, { backgroundColor: colors.primary }]}>
+                <Text style={mainStyles.emptyBtnText}>Create Room</Text>
+              </Pressable>
+            </View>
+          }
+        />
+      )}
 
-      {/* Room modal */}
       {activeRoom && (
         <RoomModal
           room={activeRoom}
           user={user}
-          onLeave={() => setActiveRoom(null)}
+          onLeave={handleLeaveRoom}
+          onMinimize={() => { setMinimizedRoom(activeRoom); setActiveRoom(null); }}
           visible={!!activeRoom}
+          onUpdateRoom={handleUpdateRoom}
+          onRoomDeleted={(roomId) => { void handleDeleteRoomLocally(roomId); }}
+          recommendedRooms={roomsForDisplay}
+          onJoinRecommended={(room) => {
+            setActiveRoom(room);
+            setMinimizedRoom(null);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          }}
         />
       )}
 
-      {/* Create modal */}
+      {minimizedRoom && (
+        <FloatingVoicePlayer
+          roomName={minimizedRoom.topic}
+          language={minimizedRoom.language}
+          isMuted={true}
+          isSpeaking={(minimizedRoom.participants || []).some(p => p.isSpeaking)}
+          onRestore={() => { setActiveRoom(minimizedRoom); setMinimizedRoom(null); }}
+          onLeave={() => { void handleLeaveRoom(minimizedRoom); }}
+        />
+      )}
+
       <CreateRoomModal
         visible={showCreate}
         onClose={() => setShowCreate(false)}
-        onCreated={room => {
-          setRooms(prev => [room, ...prev]);
-          setShowCreate(false);
-          setActiveRoom(room);
-        }}
+        onCreated={handleCreateRoom}
         colors={colors}
+        user={user}
       />
     </View>
   );
 }
-
-const mainStyles = StyleSheet.create({
-  container: { flex: 1 },
-  header: { flexDirection: "row", alignItems: "flex-start", paddingHorizontal: 20, paddingBottom: 12, gap: 12 },
-  title: { fontSize: 22, fontFamily: "Nunito_800ExtraBold" },
-  sub: { fontSize: 12, fontFamily: "Nunito_400Regular", marginTop: 3 },
-  newBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, marginTop: 4 },
-  newBtnText: { color: "#fff", fontSize: 13, fontFamily: "Nunito_700Bold" },
-  filterRow: { paddingHorizontal: 16, gap: 8, paddingBottom: 12 },
-  chip: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
-  chipDot: { width: 7, height: 7, borderRadius: 3.5 },
-  chipText: { fontSize: 13, fontFamily: "Nunito_600SemiBold" },
-  list: { padding: 16, gap: 12, paddingBottom: 30 },
-  empty: { alignItems: "center", paddingVertical: 60, gap: 12 },
-  emptyText: { fontSize: 14, fontFamily: "Nunito_400Regular" },
-  emptyBtn: { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20, marginTop: 4 },
-  emptyBtnText: { color: "#fff", fontSize: 14, fontFamily: "Nunito_700Bold" },
-});

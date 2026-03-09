@@ -1,6 +1,10 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
+import "dotenv/config";
 import { registerRoutes } from "./routes";
+import { registerAudioRoutes } from "./replit_integrations/audio/routes";
+import { messageRealtime } from "./messageRealtime";
+import { voiceRealtime } from "./voiceRealtime";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -233,6 +237,11 @@ function setupErrorHandler(app: express.Application) {
   configureExpoAndLanding(app);
 
   const server = await registerRoutes(app);
+  voiceRealtime.attach(server);
+  messageRealtime.attach(server);
+
+  // Register audio/voice routes
+  registerAudioRoutes(app);
 
   setupErrorHandler(app);
 
@@ -241,7 +250,6 @@ function setupErrorHandler(app: express.Application) {
     {
       port,
       host: "0.0.0.0",
-      reusePort: true,
     },
     () => {
       log(`express server serving on port ${port}`);

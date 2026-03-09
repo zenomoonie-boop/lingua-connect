@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, Pressable, StyleSheet,
   useColorScheme, Alert, ActivityIndicator,
 } from "react-native";
+import { BlurView } from "expo-blur";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
@@ -10,6 +11,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import { useAuth } from "@/context/AuthContext";
 import * as Haptics from "expo-haptics";
+import { BrandMark } from "@/components/BrandMark";
 
 export default function LoginScreen() {
   const colorScheme = useColorScheme();
@@ -23,18 +25,24 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
 
+  const isValidEmail = (value: string) => /\S+@\S+\.\S+/.test(value.trim());
+
   const handleLogin = async () => {
     if (!email.trim() || !password) {
       Alert.alert("Missing fields", "Please enter your email and password.");
       return;
     }
+    if (!isValidEmail(email)) {
+      Alert.alert("Invalid email", "Please enter a valid email address.");
+      return;
+    }
     setLoading(true);
     try {
       await login(email.trim(), password);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      router.dismissAll();
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.replace("/(tabs)/home");
     } catch (e: any) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert("Login failed", e.message);
     } finally {
       setLoading(false);
@@ -42,69 +50,73 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={styles.screen}>
+      <View style={styles.bgHaloOne} pointerEvents="none" />
+      <View style={styles.bgHaloTwo} pointerEvents="none" />
+      <View style={styles.floatBubbleOne} pointerEvents="none" />
+      <View style={styles.floatBubbleTwo} pointerEvents="none" />
+      <View style={styles.floatBubbleThree} pointerEvents="none" />
+
       <KeyboardAwareScrollViewCompat
-        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 60 }]}
+        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 28 }]}
         bottomOffset={20}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.hero}>
-          <View style={[styles.logoIcon, { backgroundColor: colors.primary + "20" }]}>
-            <Ionicons name="language" size={36} color={colors.primary} />
-          </View>
-          <Text style={[styles.title, { color: colors.text }]}>Welcome back</Text>
-          <Text style={[styles.subtitle, { color: colors.muted }]}>Sign in to continue your language journey</Text>
+          <BrandMark size={132} titleColor="#DCE8F3" subtitleColor="#B8C9DA" />
+          <Text style={styles.heroTitle}>Welcome back</Text>
+          <Text style={styles.heroSubtitle}>Sign in and continue your conversations, lessons, and voice rooms.</Text>
         </View>
 
         <View style={styles.form}>
-          <View style={[styles.inputWrapper, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Ionicons name="mail-outline" size={18} color={colors.muted} />
-            <TextInput
-              value={email}
-              onChangeText={setEmail}
-              placeholder="Email address"
-              placeholderTextColor={colors.muted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              style={[styles.input, { color: colors.text }]}
-            />
-          </View>
+          <BlurView intensity={30} tint="light" style={styles.fieldShell}>
+            <View style={[styles.inputWrapper, { borderColor: "rgba(255,255,255,0.18)" }]}>
+              <Ionicons name="mail-outline" size={18} color="#9BB2C8" />
+              <TextInput
+                value={email}
+                onChangeText={setEmail}
+                placeholder="Email address"
+                placeholderTextColor="#97ABC0"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                style={[styles.input, { color: colors.text }]}
+              />
+            </View>
+          </BlurView>
 
-          <View style={[styles.inputWrapper, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Ionicons name="lock-closed-outline" size={18} color={colors.muted} />
-            <TextInput
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Password"
-              placeholderTextColor={colors.muted}
-              secureTextEntry={!showPw}
-              style={[styles.input, { color: colors.text }]}
-            />
-            <Pressable onPress={() => setShowPw(!showPw)}>
-              <Ionicons name={showPw ? "eye-off-outline" : "eye-outline"} size={18} color={colors.muted} />
-            </Pressable>
-          </View>
+          <BlurView intensity={30} tint="light" style={styles.fieldShell}>
+            <View style={[styles.inputWrapper, { borderColor: "rgba(255,255,255,0.18)" }]}>
+              <Ionicons name="lock-closed-outline" size={18} color="#9BB2C8" />
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                placeholder="Password"
+                placeholderTextColor="#97ABC0"
+                secureTextEntry={!showPw}
+                style={[styles.input, { color: colors.text }]}
+              />
+              <Pressable onPress={() => setShowPw(!showPw)}>
+                <Ionicons name={showPw ? "eye-off-outline" : "eye-outline"} size={18} color="#9BB2C8" />
+              </Pressable>
+            </View>
+          </BlurView>
 
           <Pressable
             onPress={handleLogin}
             disabled={loading}
             style={({ pressed }) => [
               styles.primaryBtn,
-              { backgroundColor: colors.primary, opacity: pressed ? 0.85 : 1 },
+              { opacity: pressed ? 0.9 : 1 },
             ]}
           >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryBtnText}>Sign In</Text>
-            )}
+            {loading ? <ActivityIndicator color="#062C53" /> : <Text style={styles.primaryBtnText}>Sign In</Text>}
           </Pressable>
         </View>
 
         <View style={styles.footer}>
-          <Text style={[styles.footerText, { color: colors.muted }]}>Don't have an account?</Text>
+          <Text style={styles.footerText}>New to LinguaConnect?</Text>
           <Pressable onPress={() => router.replace("/(auth)/register")}>
-            <Text style={[styles.linkText, { color: colors.primary }]}> Create one</Text>
+            <Text style={styles.footerLink}> Create account</Text>
           </Pressable>
         </View>
       </KeyboardAwareScrollViewCompat>
@@ -113,23 +125,141 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scroll: { flexGrow: 1, padding: 24 },
-  hero: { alignItems: "center", gap: 12, marginBottom: 36 },
-  logoIcon: { width: 80, height: 80, borderRadius: 24, alignItems: "center", justifyContent: "center" },
-  title: { fontSize: 28, fontFamily: "Nunito_800ExtraBold" },
-  subtitle: { fontSize: 15, fontFamily: "Nunito_400Regular", textAlign: "center" },
-  form: { gap: 14 },
+  screen: {
+    flex: 1,
+    backgroundColor: "#062C53",
+  },
+  bgHaloOne: {
+    position: "absolute",
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: "rgba(33, 160, 255, 0.10)",
+    top: 60,
+    left: -100,
+  },
+  bgHaloTwo: {
+    position: "absolute",
+    width: 280,
+    height: 280,
+    borderRadius: 140,
+    backgroundColor: "rgba(31, 219, 199, 0.08)",
+    bottom: 50,
+    right: -90,
+  },
+  floatBubbleOne: {
+    position: "absolute",
+    width: 146,
+    height: 146,
+    borderRadius: 73,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    top: 190,
+    right: -28,
+  },
+  floatBubbleTwo: {
+    position: "absolute",
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(255,255,255,0.05)",
+    top: 430,
+    left: -18,
+  },
+  floatBubbleThree: {
+    position: "absolute",
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    bottom: 150,
+    right: 30,
+  },
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingBottom: 36,
+  },
+  hero: {
+    alignItems: "center",
+    marginBottom: 34,
+  },
+  heroTitle: {
+    marginTop: 10,
+    color: "#F4F8FC",
+    fontSize: 30,
+    fontFamily: "Nunito_800ExtraBold",
+  },
+  heroSubtitle: {
+    marginTop: 8,
+    color: "#A7BDD2",
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: "center",
+    fontFamily: "Nunito_400Regular",
+    maxWidth: 320,
+  },
+  form: {
+    gap: 14,
+  },
+  fieldShell: {
+    borderRadius: 22,
+    overflow: "hidden",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.14)",
+  },
   inputWrapper: {
-    flexDirection: "row", alignItems: "center", gap: 10,
-    paddingHorizontal: 14, paddingVertical: 14, borderRadius: 14, borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 22,
+    borderWidth: 1,
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
-  input: { flex: 1, fontSize: 15, fontFamily: "Nunito_400Regular" },
+  input: {
+    flex: 1,
+    fontSize: 15,
+    fontFamily: "Nunito_400Regular",
+  },
   primaryBtn: {
-    paddingVertical: 16, borderRadius: 14, alignItems: "center",
+    marginTop: 6,
+    backgroundColor: "#DBF7F2",
+    paddingVertical: 17,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#D5FFF7",
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    elevation: 9,
   },
-  primaryBtnText: { color: "#fff", fontSize: 16, fontFamily: "Nunito_700Bold" },
-  footer: { flexDirection: "row", justifyContent: "center", marginTop: 24 },
-  footerText: { fontSize: 14, fontFamily: "Nunito_400Regular" },
-  linkText: { fontSize: 14, fontFamily: "Nunito_700Bold" },
+  primaryBtnText: {
+    color: "#062C53",
+    fontSize: 16,
+    fontFamily: "Nunito_800ExtraBold",
+  },
+  footer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: 24,
+  },
+  footerText: {
+    color: "#A7BDD2",
+    fontSize: 14,
+    fontFamily: "Nunito_400Regular",
+  },
+  footerLink: {
+    color: "#D7FFF8",
+    fontSize: 14,
+    fontFamily: "Nunito_700Bold",
+  },
 });

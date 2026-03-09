@@ -1,15 +1,31 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View, Text, ScrollView, StyleSheet, Pressable,
-  useColorScheme, Platform, Modal, TextInput, Animated,
+  useColorScheme, Platform, Modal, TextInput, Animated, Switch, Linking, Image, Appearance, Alert
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import Colors from "@/constants/colors";
+import { ScreenBackdrop } from "@/components/ScreenBackdrop";
+import { useNavigation } from "@react-navigation/native";
 import { LANGUAGES } from "@/data/lessons";
 import { useAuth } from "@/context/AuthContext";
 import { useProgress } from "@/context/ProgressContext";
 import * as Haptics from "expo-haptics";
+import * as ImagePicker from "expo-image-picker";
+import * as Location from "expo-location";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { createMoment, loadMoments, saveMoments, type UserMoment } from "@/lib/moments";
+import { COUNTRIES, GENDER_OPTIONS, getCountryByCode } from "@/data/profileOptions";
+
+// ─── Default Location (San Juan, Philippines) ───────────────────────────────
+
+const DEFAULT_LOCATION = {
+  latitude: 14.5995,
+  longitude: 121.0369,
+  locationName: "San Juan, Philippines",
+};
 
 // ─── Avatar Colors ────────────────────────────────────────────────────────────
 
@@ -22,49 +38,231 @@ function makeInitials(name: string) {
   return name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
 }
 
+
 // ─── Simulated Data ───────────────────────────────────────────────────────────
 
-const SAMPLE_REVIEWS = [
-  { id: "r1", name: "Maria Santos", initials: "MS", color: "#4ECDC4", stars: 5, text: "Great language partner! Very patient and helpful. My English improved a lot after practicing with them.", time: "2 days ago" },
-  { id: "r2", name: "Park Jun", initials: "PJ", color: "#8B7CF6", stars: 5, text: "Super active in voice rooms. Always gives helpful corrections without making you feel bad.", time: "1 week ago" },
-  { id: "r3", name: "Sofia Lima", initials: "SL", color: "#F7C948", stars: 4, text: "Really dedicated to learning. We practice together every day now!", time: "2 weeks ago" },
-];
+type ProfileReview = { id: string; name: string; initials: string; color: string; stars: number; text: string; time: string };
+const EMPTY_REVIEWS: ProfileReview[] = [];
 
-const SAMPLE_MOMENTS = [
-  {
-    id: "m1",
-    text: "Today I learned the difference between 'affect' and 'effect'. It's tricky but I think I finally get it!",
-    lang: "English",
-    langColor: "#2563EB",
-    likes: 12,
-    comments: 3,
-    time: "2h ago",
-    isOwn: true,
-    correction: null,
-  },
-  {
-    id: "m2",
-    text: "Practiced speaking for 30 minutes today in the voice room. I was nervous at first but everyone was so encouraging!",
-    lang: "English",
-    langColor: "#2563EB",
-    likes: 28,
-    comments: 7,
-    time: "1d ago",
-    isOwn: true,
-    correction: null,
-  },
-  {
-    id: "m3",
-    text: "I can now introduce myself in English without looking at my notes. Small win but I'm proud!",
-    lang: "English",
-    langColor: "#2563EB",
-    likes: 34,
-    comments: 5,
-    time: "3d ago",
-    isOwn: true,
-    correction: { original: "I can now introduce myself", corrected: null, note: null },
-  },
-];
+// ─── Storage Keys ──────────────────────────────────────────────────────────────
+
+const NOTIFICATION_KEY = "lingua_notifications";
+const PRIVACY_KEY = "lingua_privacy";
+const LANGUAGE_KEY = "lingua_language";
+const APPEARANCE_KEY = "lingua_appearance";
+
+// ─── Settings Modal Types ─────────────────────────────────────────────────────
+
+type SettingsModalType = "notifications" | "privacy" | "language" | "appearance" | "help" | "about" | null;
+
+function SettingsModal({ type, visible, onClose, colors }: {
+  type: SettingsModalType; visible: boolean; onClose: () => void; colors: typeof Colors.dark;
+}) {
+  const [notifications, setNotifications] = useState(true);
+  const [privacySetting, setPrivacySetting] = useState("everyone");
+  const [appLanguage, setAppLanguage] = useState("English");
+  const [isDarkMode, setIsDarkMode] = useState(useColorScheme() === "dark");
+
+  useEffect(() => {
+    if (visible) {
+      loadSettings();
+    }
+  }, [visible]);
+
+  const loadSettings = async () => {
+    try {
+      const notif = await AsyncStorage.getItem(NOTIFICATION_KEY);
+      if (notif !== null) setNotifications(JSON.parse(notif));
+      const privacy = await AsyncStorage.getItem(PRIVACY_KEY);
+      if (privacy !== null) setPrivacySetting(privacy);
+      const lang = await AsyncStorage.getItem(LANGUAGE_KEY);
+      if (lang !== null) setAppLanguage(lang);
+      const appearance = await AsyncStorage.getItem(APPEARANCE_KEY);
+      if (appearance !== null) setIsDarkMode(JSON.parse(appearance));
+    } catch (e) { console.log(e); }
+  };
+
+  const saveNotification = async (value: boolean) => {
+    setNotifications(value);
+    await AsyncStorage.setItem(NOTIFICATION_KEY, JSON.stringify(value));
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert("Notifications", value ? "Notifications enabled" : "Notifications disabled");
+  };
+
+  const savePrivacy = async (value: string) => {
+    setPrivacySetting(value);
+    await AsyncStorage.setItem(PRIVACY_KEY, value);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert("Privacy Updated", `Profile visibility set to: ${value === "everyone" ? "Everyone" : value === "friends" ? "Friends Only" : "No One"}`);
+  };
+
+  const saveLanguage = async (value: string) => {
+    setAppLanguage(value);
+    await AsyncStorage.setItem(LANGUAGE_KEY, value);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert("Language Changed", `App language set to ${value}. Please restart the app to apply changes.`);
+  };
+
+  const saveAppearance = async (value: boolean) => {
+    setIsDarkMode(value);
+    await AsyncStorage.setItem(APPEARANCE_KEY, JSON.stringify(value));
+    Appearance.setColorScheme(value ? "dark" : "light");
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const insets = useSafeAreaInsets();
+  const topPad = Platform.OS === "web" ? 67 : insets.top;
+
+  const renderContent = () => {
+    switch (type) {
+      case "notifications":
+        return (
+          <View style={setStyle.section}>
+            <Text style={[setStyle.title, { color: colors.text }]}>Notifications</Text>
+            <View style={[setStyle.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[setStyle.label, { color: colors.text }]}>Push Notifications</Text>
+                <Text style={[setStyle.sub, { color: colors.muted }]}>Receive notifications for new messages and room invites</Text>
+              </View>
+              <Switch value={notifications} onValueChange={saveNotification} trackColor={{ true: colors.primary }} />
+            </View>
+            <View style={[setStyle.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[setStyle.label, { color: colors.text }]}>Sound</Text>
+                <Text style={[setStyle.sub, { color: colors.muted }]}>Play sound for notifications</Text>
+              </View>
+              <Switch value={notifications} onValueChange={saveNotification} trackColor={{ true: colors.primary }} />
+            </View>
+          </View>
+        );
+      case "privacy":
+        return (
+          <View style={setStyle.section}>
+            <Text style={[setStyle.title, { color: colors.text }]}>Privacy</Text>
+            <Text style={[setStyle.label, { color: colors.muted, marginBottom: 8 }]}>Who can see your profile</Text>
+            {["everyone", "friends", "noone"].map((opt) => (
+              <Pressable
+                key={opt}
+                onPress={() => savePrivacy(opt)}
+                style={[setStyle.optionRow, { backgroundColor: colors.card, borderColor: privacySetting === opt ? colors.primary : colors.border }]}
+              >
+                <Text style={[setStyle.optionText, { color: colors.text }]}>
+                  {opt === "everyone" ? "Everyone" : opt === "friends" ? "Friends Only" : "No One"}
+                </Text>
+                {privacySetting === opt && <Ionicons name="checkmark" size={20} color={colors.primary} />}
+              </Pressable>
+            ))}
+          </View>
+        );
+      case "language":
+        return (
+          <View style={setStyle.section}>
+            <Text style={[setStyle.title, { color: colors.text }]}>Language Preferences</Text>
+            <Text style={[setStyle.label, { color: colors.muted, marginBottom: 8 }]}>App Language</Text>
+            {["English", "Filipino", "Spanish", "French", "German", "Japanese", "Korean", "Mandarin"].map((lang) => (
+              <Pressable
+                key={lang}
+                onPress={() => saveLanguage(lang)}
+                style={[setStyle.optionRow, { backgroundColor: colors.card, borderColor: appLanguage === lang ? colors.primary : colors.border }]}
+              >
+                <Text style={[setStyle.optionText, { color: colors.text }]}>{lang}</Text>
+                {appLanguage === lang && <Ionicons name="checkmark" size={20} color={colors.primary} />}
+              </Pressable>
+            ))}
+          </View>
+        );
+      case "appearance":
+        return (
+          <View style={setStyle.section}>
+            <Text style={[setStyle.title, { color: colors.text }]}>Appearance</Text>
+            <View style={[setStyle.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[setStyle.label, { color: colors.text }]}>Dark Mode</Text>
+                <Text style={[setStyle.sub, { color: colors.muted }]}>Use dark theme</Text>
+              </View>
+              <Switch value={isDarkMode} onValueChange={saveAppearance} trackColor={{ true: colors.primary }} />
+            </View>
+          </View>
+        );
+      case "help":
+        return (
+          <View style={setStyle.section}>
+            <Text style={[setStyle.title, { color: colors.text }]}>Help & Support</Text>
+            <Pressable
+              onPress={() => Linking.openURL("mailto:support@linguaconnect.app")}
+              style={[setStyle.row, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <Ionicons name="mail-outline" size={20} color={colors.primary} />
+              <Text style={[setStyle.label, { color: colors.text, flex: 1 }]}>Contact Us</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.muted} />
+            </Pressable>
+            <Pressable
+              onPress={() => Linking.openURL("https://linguaconnect.app/faq").catch(() => Alert.alert("Error", "Could not open FAQ page"))}
+              style={[setStyle.row, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
+              <Ionicons name="help-circle-outline" size={20} color={colors.primary} />
+              <Text style={[setStyle.label, { color: colors.text, flex: 1 }]}>FAQ</Text>
+              <Ionicons name="chevron-forward" size={16} color={colors.muted} />
+            </Pressable>
+          </View>
+        );
+      case "about":
+        return (
+          <View style={setStyle.section}>
+            <Text style={[setStyle.title, { color: colors.text }]}>About LinguaConnect</Text>
+            <View style={[setStyle.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[setStyle.label, { color: colors.text }]}>Version</Text>
+              <Text style={[setStyle.sub, { color: colors.muted }]}>1.0.0</Text>
+            </View>
+            <View style={[setStyle.row, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Text style={[setStyle.label, { color: colors.text }]}>Developer</Text>
+              <Text style={[setStyle.sub, { color: colors.muted }]}>LinguaConnect Team</Text>
+            </View>
+          </View>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
+      <View style={[setStyle.container, { backgroundColor: colors.background }]}>
+        <View style={[setStyle.header, { paddingTop: topPad + 8, borderBottomColor: colors.border }]}>
+          <Pressable onPress={onClose} style={setStyle.headerBtn}>
+            <Ionicons name="chevron-back" size={24} color={colors.primary} />
+          </Pressable>
+          <Text style={[setStyle.headerTitle, { color: colors.text }]}>
+            {type === "notifications" ? "Notifications" :
+             type === "privacy" ? "Privacy" :
+             type === "language" ? "Language" :
+             type === "appearance" ? "Appearance" :
+             type === "help" ? "Help & Support" :
+             type === "about" ? "About" : "Settings"}
+          </Text>
+          <View style={setStyle.headerBtn} />
+        </View>
+        <ScrollView contentContainerStyle={{ padding: 16 }} showsVerticalScrollIndicator={false}>
+          {renderContent()}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+const setStyle = StyleSheet.create({
+  container: { flex: 1 },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
+  headerBtn: { width: 40, alignItems: "center" },
+  headerTitle: { fontSize: 18, fontFamily: "Nunito_700Bold" },
+  section: { gap: 12 },
+  title: { fontSize: 20, fontFamily: "Nunito_800ExtraBold", marginBottom: 4 },
+  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, borderRadius: 12, borderWidth: 1 },
+  label: { fontSize: 15, fontFamily: "Nunito_600SemiBold" },
+  sub: { fontSize: 12, fontFamily: "Nunito_400Regular", marginTop: 2 },
+  optionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 14, borderRadius: 12, borderWidth: 1 },
+  optionText: { fontSize: 15, fontFamily: "Nunito_500Medium" },
+});
 
 // ─── Edit Profile Modal ───────────────────────────────────────────────────────
 
@@ -75,17 +273,71 @@ function EditProfileModal({ visible, onClose, colors }: {
   const [name, setName] = useState(user?.displayName || "");
   const [bio, setBio] = useState(user?.bio || "");
   const [nativeLang, setNativeLang] = useState(user?.nativeLanguage || "Filipino");
+  const [gender, setGender] = useState(user?.gender || "Female");
+  const [age, setAge] = useState(user?.age ? String(user.age) : "");
+  const [countryCode, setCountryCode] = useState(user?.countryCode || "PH");
   const [avatarColor, setAvatarColor] = useState(user?.avatarColor || AVATAR_COLORS[0]);
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    if (visible && user) {
+      setName(user.displayName || "");
+      setBio(user.bio || "");
+      setNativeLang(user.nativeLanguage || "Filipino");
+      setGender(user.gender || "Female");
+      setAge(user.age ? String(user.age) : "");
+      setCountryCode(user.countryCode || "PH");
+      setAvatarColor(user.avatarColor || AVATAR_COLORS[0]);
+      setAvatarUri(user.avatarUri || null);
+    }
+  }, [visible, user]);
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert("Permission Required", "Please allow access to your photos to change your profile picture.");
+      return;
+    }
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.5,
+      });
+      if (!result.canceled && result.assets[0]) {
+        setAvatarUri(result.assets[0].uri);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to pick image. Please try again.");
+    }
+  };
+
   const handleSave = async () => {
+    const selectedCountry = getCountryByCode(countryCode) || COUNTRIES[0];
+    const parsedAge = Number(age);
     setSaving(true);
     try {
-      await updateProfile({ displayName: name.trim() || user?.displayName, bio, nativeLanguage: nativeLang, avatarColor });
+      await updateProfile({ 
+        displayName: name.trim() || user?.displayName, 
+        bio, 
+        gender,
+        age: Number.isFinite(parsedAge) && parsedAge > 0 ? parsedAge : undefined,
+        countryCode: selectedCountry.code,
+        countryName: selectedCountry.name,
+        flag: selectedCountry.flag,
+        nativeLanguage: nativeLang, 
+        avatarColor,
+        avatarUri: avatarUri || undefined,
+      });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       onClose();
-    } catch {
+    } catch (e) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert("Error", "Failed to save profile. Please try again.");
     } finally {
       setSaving(false);
     }
@@ -112,10 +364,22 @@ function EditProfileModal({ visible, onClose, colors }: {
         <ScrollView contentContainerStyle={{ padding: 20, gap: 20 }} showsVerticalScrollIndicator={false}>
           {/* Avatar picker */}
           <View style={editStyle.section}>
-            <View style={[editStyle.bigAvatar, { backgroundColor: avatarColor }]}>
-              <Text style={editStyle.bigInitials}>{makeInitials(name || user?.displayName || "?")}</Text>
-            </View>
-            <Text style={[editStyle.label, { color: colors.muted }]}>CHOOSE AVATAR COLOR</Text>
+            <Pressable onPress={pickImage} style={{ alignItems: "center" }}>
+              {avatarUri ? (
+                <View style={{ position: "relative" }}>
+                  <Image source={{ uri: avatarUri }} style={editStyle.bigAvatar} />
+                  <View style={[editStyle.cameraOverlay, { backgroundColor: colors.background }]}>
+                    <Ionicons name="camera" size={20} color={colors.text} />
+                  </View>
+                </View>
+              ) : (
+                <View style={[editStyle.bigAvatar, { backgroundColor: avatarColor }]}>
+                  <Text style={editStyle.bigInitials}>{makeInitials(name || user?.displayName || "?")}</Text>
+                </View>
+              )}
+            </Pressable>
+            <Text style={[editStyle.label, { color: colors.muted }]}>TAP TO CHANGE PHOTO</Text>
+            <Text style={[editStyle.label, { color: colors.muted, marginTop: 16 }]}>CHOOSE AVATAR COLOR</Text>
             <View style={editStyle.colorGrid}>
               {AVATAR_COLORS.map(c => (
                 <Pressable
@@ -157,6 +421,87 @@ function EditProfileModal({ visible, onClose, colors }: {
             </Text>
           </View>
 
+          <View style={{ gap: 8 }}>
+            <Text style={[editStyle.label, { color: colors.muted }]}>GENDER</Text>
+            <View style={editStyle.optionRow}>
+              {GENDER_OPTIONS.map((option) => {
+                const selected = gender === option;
+                const isFemale = option === "Female";
+                return (
+                  <Pressable
+                    key={option}
+                    onPress={() => setGender(option)}
+                    style={[
+                      editStyle.genderChip,
+                      {
+                        backgroundColor: selected
+                          ? (isFemale ? "#FF4FA320" : "#3B82F620")
+                          : colors.card,
+                        borderColor: selected
+                          ? (isFemale ? "#FF4FA3" : "#3B82F6")
+                          : colors.border,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        editStyle.genderIconWrap,
+                        { backgroundColor: selected ? (isFemale ? "#FF4FA3" : "#3B82F6") : colors.background },
+                      ]}
+                    >
+                      <Ionicons
+                        name={isFemale ? "female" : "male"}
+                        size={20}
+                        color={selected ? "#fff" : isFemale ? "#FF4FA3" : "#3B82F6"}
+                      />
+                    </View>
+                    <Text style={[editStyle.langChipText, { color: selected ? (isFemale ? "#FF4FA3" : "#3B82F6") : colors.text }]}>
+                      {option}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={{ gap: 6 }}>
+            <Text style={[editStyle.label, { color: colors.muted }]}>AGE</Text>
+            <TextInput
+              value={age}
+              onChangeText={setAge}
+              placeholder="Your age"
+              placeholderTextColor={colors.muted}
+              keyboardType="number-pad"
+              maxLength={2}
+              style={[editStyle.input, { backgroundColor: colors.card, color: colors.text, borderColor: colors.border }]}
+            />
+          </View>
+
+          <View style={{ gap: 8 }}>
+            <Text style={[editStyle.label, { color: colors.muted }]}>COUNTRY</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={editStyle.optionRow}>
+              {COUNTRIES.map((country) => {
+                const selected = country.code === countryCode;
+                return (
+                  <Pressable
+                    key={country.code}
+                    onPress={() => setCountryCode(country.code)}
+                    style={[
+                      editStyle.countryChip,
+                      {
+                        backgroundColor: selected ? colors.primary + "18" : colors.card,
+                        borderColor: selected ? colors.primary : colors.border,
+                      },
+                    ]}
+                  >
+                    <Text style={editStyle.countryFlag}>{country.flag}</Text>
+                    <Text style={[editStyle.langChipText, { color: selected ? colors.primary : colors.text }]}>{country.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+
           {/* Native language */}
           <View style={{ gap: 8 }}>
             <Text style={[editStyle.label, { color: colors.muted }]}>NATIVE LANGUAGE</Text>
@@ -194,14 +539,21 @@ const editStyle = StyleSheet.create({
   headerBtnText: { fontSize: 16, fontFamily: "Nunito_600SemiBold" },
   headerTitle: { fontSize: 16, fontFamily: "Nunito_700Bold" },
   section: { alignItems: "center", gap: 14 },
-  bigAvatar: { width: 90, height: 90, borderRadius: 45, alignItems: "center", justifyContent: "center" },
+  bigAvatar: { width: 90, height: 90, borderRadius: 45, alignItems: "center", justifyContent: "center", position: "relative" },
   bigInitials: { color: "#fff", fontSize: 32, fontFamily: "Nunito_800ExtraBold" },
+  cameraOverlay: { position: "absolute", bottom: 0, right: 0, width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
   label: { fontSize: 11, fontFamily: "Nunito_700Bold", letterSpacing: 0.8, alignSelf: "flex-start" },
   colorGrid: { flexDirection: "row", gap: 10, flexWrap: "wrap", justifyContent: "center" },
   colorSwatch: { width: 36, height: 36, borderRadius: 18 },
   swatchSelected: { borderWidth: 3, borderColor: "#fff" },
   input: { borderRadius: 12, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 11, fontSize: 15, fontFamily: "Nunito_400Regular" },
   bioInput: { minHeight: 80, textAlignVertical: "top", paddingTop: 12 },
+  optionRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
+  optionChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
+  genderChip: { width: 118, alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 20, borderWidth: 1.5 },
+  genderIconWrap: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center" },
+  countryChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
+  countryFlag: { fontSize: 14 },
   langChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
   langChipText: { fontSize: 13, fontFamily: "Nunito_600SemiBold" },
 });
@@ -209,22 +561,24 @@ const editStyle = StyleSheet.create({
 // ─── Moment Card ──────────────────────────────────────────────────────────────
 
 function MomentCard({ moment, colors, userColor, userInitials }: {
-  moment: typeof SAMPLE_MOMENTS[0]; colors: typeof Colors.dark; userColor: string; userInitials: string;
+  moment: UserMoment; colors: typeof Colors.dark; userColor: string; userInitials: string;
 }) {
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(moment.likes);
+  const cardColor = moment.userColor || userColor;
+  const cardInitials = moment.userInitials || userInitials;
   return (
     <View style={[mStyle.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={mStyle.top}>
-        <View style={[mStyle.avatar, { backgroundColor: userColor }]}>
-          <Text style={mStyle.initials}>{userInitials}</Text>
+        <View style={[mStyle.avatar, { backgroundColor: cardColor }]}>
+          <Text style={mStyle.initials}>{cardInitials}</Text>
         </View>
         <View style={{ flex: 1 }}>
           <View style={mStyle.langBadge}>
             <View style={[mStyle.langDot, { backgroundColor: moment.langColor }]} />
             <Text style={[mStyle.langText, { color: moment.langColor }]}>{moment.lang}</Text>
           </View>
-          <Text style={[mStyle.time, { color: colors.muted }]}>{moment.time}</Text>
+          <Text style={[mStyle.time, { color: colors.muted }]}>{moment.timeLabel}</Text>
         </View>
       </View>
       <Text style={[mStyle.text, { color: colors.text }]}>{moment.text}</Text>
@@ -269,7 +623,7 @@ const mStyle = StyleSheet.create({
 
 // ─── Review Card ──────────────────────────────────────────────────────────────
 
-function ReviewCard({ review, colors }: { review: typeof SAMPLE_REVIEWS[0]; colors: typeof Colors.dark }) {
+function ReviewCard({ review, colors }: { review: ProfileReview; colors: typeof Colors.dark }) {
   return (
     <View style={[revStyle.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={revStyle.top}>
@@ -355,14 +709,18 @@ const pmStyle = StyleSheet.create({
 
 // ─── Settings Tab ─────────────────────────────────────────────────────────────
 
-function SettingsTab({ colors, onLogout }: { colors: typeof Colors.dark; onLogout: () => void }) {
+function SettingsTab({ colors, onLogout, onOpenSettings }: { 
+  colors: typeof Colors.dark; 
+  onLogout: () => void;
+  onOpenSettings: (type: SettingsModalType) => void;
+}) {
   const SETTINGS = [
-    { icon: "notifications-outline", label: "Notifications", sub: "Push notifications" },
-    { icon: "lock-closed-outline", label: "Privacy", sub: "Who can see your profile" },
-    { icon: "language-outline", label: "Language Preferences", sub: "App language & learning" },
-    { icon: "moon-outline", label: "Appearance", sub: "Dark / Light mode" },
-    { icon: "help-circle-outline", label: "Help & Support", sub: "FAQ, contact us" },
-    { icon: "information-circle-outline", label: "About LinguaConnect", sub: "Version 1.0.0" },
+    { icon: "notifications-outline", label: "Notifications", sub: "Push notifications", type: "notifications" as const },
+    { icon: "lock-closed-outline", label: "Privacy", sub: "Who can see your profile", type: "privacy" as const },
+    { icon: "language-outline", label: "Language Preferences", sub: "App language & learning", type: "language" as const },
+    { icon: "moon-outline", label: "Appearance", sub: "Dark / Light mode", type: "appearance" as const },
+    { icon: "help-circle-outline", label: "Help & Support", sub: "FAQ, contact us", type: "help" as const },
+    { icon: "information-circle-outline", label: "About LinguaConnect", sub: "Version 1.0.0", type: "about" as const },
   ];
 
   return (
@@ -370,6 +728,7 @@ function SettingsTab({ colors, onLogout }: { colors: typeof Colors.dark; onLogou
       {SETTINGS.map(s => (
         <Pressable
           key={s.label}
+          onPress={() => onOpenSettings(s.type)}
           style={({ pressed }) => [
             sStyle.row,
             { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.7 : 1 },
@@ -417,13 +776,87 @@ export default function ProfileScreen() {
   const isDark = colorScheme === "dark";
   const colors = isDark ? Colors.dark : Colors.light;
   const insets = useSafeAreaInsets();
-  const { user, logout } = useAuth();
+  const { user, logout, updateProfile } = useAuth();
   const { progress } = useProgress();
 
   const [activeTab, setActiveTab] = useState<ProfileTab>("moments");
   const [showEdit, setShowEdit] = useState(false);
   const [showPost, setShowPost] = useState(false);
-  const [moments, setMoments] = useState(SAMPLE_MOMENTS);
+  const [showFullImage, setShowFullImage] = useState(false);
+  const [moments, setMoments] = useState<UserMoment[]>([]);
+  const [settingsModal, setSettingsModal] = useState<SettingsModalType>(null);
+
+  // Location state for map background
+  const [userLocation, setUserLocation] = useState<{
+    latitude: number;
+    longitude: number;
+    locationName?: string;
+  } | null>(null);
+  const [locationLoading, setLocationLoading] = useState(false);
+
+  // Load user location from profile on mount
+  useEffect(() => {
+    if (user?.latitude && user?.longitude) {
+      setUserLocation({
+        latitude: user.latitude,
+        longitude: user.longitude,
+        locationName: user.locationName,
+      });
+    } else {
+      setUserLocation(DEFAULT_LOCATION);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const bootstrapMoments = async () => {
+      const allMoments = await loadMoments();
+      if (!mounted) return;
+      setMoments(allMoments.filter((moment) => moment.userId === user?.id));
+    };
+
+    bootstrapMoments();
+
+    return () => {
+      mounted = false;
+    };
+  }, [user?.id]);
+
+  const getCurrentLocation = async () => {
+    setLocationLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission is required to show your location on the map.');
+        setLocationLoading(false);
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+      const { latitude, longitude } = location.coords;
+
+      let locationName = 'Current Location';
+      try {
+        const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
+        if (address) {
+          locationName = address.city || address.region || address.country || 'Current Location';
+        }
+      } catch (e) {
+        console.log('Reverse geocode error:', e);
+      }
+
+      setUserLocation({ latitude, longitude, locationName });
+      await updateProfile({ latitude, longitude, locationName });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Location Updated', `Your location has been set to ${locationName}`);
+    } catch (error) {
+      console.error('Location error:', error);
+      Alert.alert('Error', 'Failed to get your location. Please try again.');
+    } finally {
+      setLocationLoading(false);
+    }
+  };
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
   const botInset = Platform.OS === "web" ? 34 : 0;
@@ -431,31 +864,73 @@ export default function ProfileScreen() {
   const displayName = user?.displayName || "Learner";
   const initials = makeInitials(displayName);
   const avatarColor = user?.avatarColor || AVATAR_COLORS[0];
-  const bio = user?.bio || "Language learner on a mission to speak fluently!";
+  const avatarUri = user?.avatarUri;
+  const bio = user?.bio || "";
   const nativeLang = user?.nativeLanguage || "Filipino";
-  const followers = user?.followers ?? 128;
-  const following = user?.following ?? 54;
+  const countryFlag = user?.flag || "🌍";
+  const countryName = user?.countryName || "Set country";
+  const gender = user?.gender || "";
+  const genderIcon = gender === "Female" ? "female" : "male";
+  const genderColor = gender === "Female" ? "#EC4899" : "#3B82F6";
+  const age = user?.age;
+  const followers = user?.followers ?? 0;
+  const following = user?.following ?? 0;
   const momentCount = moments.length;
   const level = Math.floor(progress.totalXP / 200) + 1;
 
   const handleLogout = async () => {
-    await logout();
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    Alert.alert("Sign Out", "Are you sure you want to sign out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign Out",
+        style: "destructive",
+        onPress: async () => {
+          await logout();
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          router.replace("/(auth)/login");
+        },
+      },
+    ]);
   };
 
-  const addMoment = (text: string) => {
-    const newMoment = {
+  const addMoment = async (text: string) => {
+    const newMoment: UserMoment = {
       id: `m-${Date.now()}`,
+      userId: user?.id || "me",
+      userName: user?.displayName || "You",
+      userInitials: initials,
+      userColor: avatarColor,
+      userAvatarUri: avatarUri,
       text,
       lang: "English",
       langColor: "#2563EB",
       likes: 0,
       comments: 0,
-      time: "just now",
+      createdAt: Date.now(),
+      timeLabel: "just now",
       isOwn: true,
       correction: null,
     };
-    setMoments(prev => [newMoment, ...prev]);
+    const created = await createMoment({
+      text,
+      lang: newMoment.lang,
+      langColor: newMoment.langColor,
+      correction: null,
+    });
+
+    if (created?.moment) {
+      const nextMoments = [created.moment, ...moments];
+      setMoments(nextMoments);
+      await updateProfile({ moments: created.userMomentsCount ?? nextMoments.length });
+      return;
+    }
+
+    const nextMoments = [newMoment, ...moments];
+    setMoments(nextMoments);
+    const allMoments = await loadMoments();
+    const mergedMoments = [newMoment, ...allMoments];
+    await saveMoments(mergedMoments);
+    await updateProfile({ moments: nextMoments.length });
   };
 
   const TABS: { key: ProfileTab; icon: string; label: string }[] = [
@@ -466,12 +941,16 @@ export default function ProfileScreen() {
 
   return (
     <View style={[pStyle.container, { backgroundColor: colors.background }]}>
+      <ScreenBackdrop
+        primaryColor={colors.primary + "16"}
+        secondaryColor={colors.gold + "12"}
+      />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: Math.max(botInset, 80) }}
       >
         {/* Header background */}
-        <View style={[pStyle.headerBg, { paddingTop: topInset, backgroundColor: colors.card }]}>
+        <View style={[pStyle.headerBg, { paddingTop: topInset, backgroundColor: colors.card + "CC", borderColor: colors.border + "88" }]}>
           {/* Top row: back + edit button */}
           <View style={pStyle.topBar}>
             <Text style={[pStyle.screenLabel, { color: colors.muted }]}>Profile</Text>
@@ -487,9 +966,17 @@ export default function ProfileScreen() {
           {/* Avatar + info */}
           <View style={pStyle.profileRow}>
             <View style={{ position: "relative" }}>
-              <View style={[pStyle.avatar, { backgroundColor: avatarColor }]}>
-                <Text style={pStyle.avatarInitials}>{initials}</Text>
-              </View>
+              {/* Avatar only - no map background */}
+              
+              <Pressable onPress={() => setShowFullImage(true)}>
+                {avatarUri ? (
+                  <Image source={{ uri: avatarUri }} style={pStyle.avatar} />
+                ) : (
+                  <View style={[pStyle.avatar, { backgroundColor: avatarColor }]}>
+                    <Text style={pStyle.avatarInitials}>{initials}</Text>
+                  </View>
+                )}
+              </Pressable>
               <Pressable
                 onPress={() => setShowEdit(true)}
                 style={[pStyle.avatarEdit, { backgroundColor: colors.background, borderColor: colors.border }]}
@@ -505,14 +992,36 @@ export default function ProfileScreen() {
                   <Ionicons name="ribbon" size={11} color={colors.primary} />
                   <Text style={[pStyle.levelText, { color: colors.primary }]}>Level {level}</Text>
                 </View>
+                <View style={[pStyle.infoBadge, { backgroundColor: colors.background + "CC", borderColor: colors.border }]}>
+                  <Text style={pStyle.infoBadgeFlag}>{countryFlag}</Text>
+                  <Text style={[pStyle.infoBadgeText, { color: colors.text }]}>{countryName}</Text>
+                </View>
                 <View style={[pStyle.langBadge, { backgroundColor: "#2563EB20" }]}>
                   <View style={[pStyle.langDot, { backgroundColor: "#2563EB" }]} />
                   <Text style={[pStyle.langText, { color: "#2563EB" }]}>{nativeLang}</Text>
                 </View>
+                {gender ? (
+                  <View style={[pStyle.infoBadge, { backgroundColor: colors.background + "CC", borderColor: colors.border }]}>
+                    <Ionicons name={genderIcon as any} size={13} color={genderColor} />
+                    {age ? <Text style={[pStyle.infoBadgeText, { color: colors.text }]}>{age}</Text> : null}
+                  </View>
+                ) : null}
               </View>
+              {/* Location display */}
+              <Pressable 
+                onPress={getCurrentLocation}
+                style={[pStyle.locationRow, { marginTop: 4 }]}
+              >
+                <Ionicons name="location" size={12} color={userLocation?.locationName ? colors.primary : colors.muted} />
+                <Text style={[pStyle.locationText, { color: userLocation?.locationName ? colors.primary : colors.muted }]}>
+                  {userLocation?.locationName || (locationLoading ? "Getting location..." : "San Juan, Philippines")}
+                </Text>
+                {!userLocation?.locationName && !locationLoading && (
+                  <Ionicons name="add-circle-outline" size={14} color={colors.muted} />
+                )}
+              </Pressable>
             </View>
           </View>
-
           {/* Bio */}
           {bio ? (
             <Text style={[pStyle.bio, { color: colors.text }]}>{bio}</Text>
@@ -616,24 +1125,24 @@ export default function ProfileScreen() {
             <View style={{ gap: 12 }}>
               {/* Average rating */}
               <View style={[pStyle.ratingCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Text style={[pStyle.ratingNum, { color: colors.text }]}>4.8</Text>
+                <Text style={[pStyle.ratingNum, { color: colors.text }]}>0.0</Text>
                 <View style={{ gap: 4 }}>
                   <View style={{ flexDirection: "row", gap: 3 }}>
                     {[1, 2, 3, 4, 5].map(i => (
-                      <Ionicons key={i} name={i <= 4 ? "star" : "star-half"} size={18} color="#F7C948" />
+                      <Ionicons key={i} name="star-outline" size={18} color="#F7C948" />
                     ))}
                   </View>
-                  <Text style={[pStyle.ratingCount, { color: colors.muted }]}>{SAMPLE_REVIEWS.length} reviews</Text>
+                  <Text style={[pStyle.ratingCount, { color: colors.muted }]}>{EMPTY_REVIEWS.length} reviews</Text>
                 </View>
               </View>
-              {SAMPLE_REVIEWS.map(r => (
+              {EMPTY_REVIEWS.map(r => (
                 <ReviewCard key={r.id} review={r} colors={colors} />
               ))}
             </View>
           )}
 
           {activeTab === "settings" && (
-            <SettingsTab colors={colors} onLogout={handleLogout} />
+            <SettingsTab colors={colors} onLogout={handleLogout} onOpenSettings={setSettingsModal} />
           )}
         </View>
       </ScrollView>
@@ -648,13 +1157,41 @@ export default function ProfileScreen() {
         onPost={addMoment}
         colors={colors}
       />
+
+      {/* Settings Modal */}
+      <SettingsModal
+        type={settingsModal}
+        visible={settingsModal !== null}
+        onClose={() => setSettingsModal(null)}
+        colors={colors}
+      />
+
+      {/* Full Image Modal */}
+      <Modal visible={showFullImage} transparent={true} animationType="fade" onRequestClose={() => setShowFullImage(false)}>
+        <Pressable style={pStyle.fullImageOverlay} onPress={() => setShowFullImage(false)}>
+          {avatarUri ? (
+            <Image source={{ uri: avatarUri }} style={pStyle.fullImage} resizeMode="contain" />
+          ) : (
+            <View style={[pStyle.fullImagePlaceholder, { backgroundColor: avatarColor }]}>
+              <Text style={pStyle.fullImageInitials}>{initials}</Text>
+            </View>
+          )}
+          <Pressable onPress={() => setShowFullImage(false)} style={pStyle.closeFullImageBtn}>
+            <Ionicons name="close-circle" size={40} color="#fff" />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
 const pStyle = StyleSheet.create({
   container: { flex: 1 },
-  headerBg: { paddingHorizontal: 20, paddingBottom: 0, gap: 12 },
+  bgOrbWrap: { ...StyleSheet.absoluteFillObject, overflow: "hidden" },
+  bgOrb: { position: "absolute", borderRadius: 999 },
+  bgOrbOne: { width: 220, height: 220, top: -70, right: -60 },
+  bgOrbTwo: { width: 180, height: 180, top: 180, left: -90 },
+  headerBg: { paddingHorizontal: 20, paddingBottom: 0, gap: 12, borderBottomWidth: 1 },
   topBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 8 },
   screenLabel: { fontSize: 14, fontFamily: "Nunito_600SemiBold" },
   editBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1 },
@@ -663,6 +1200,7 @@ const pStyle = StyleSheet.create({
   avatar: { width: 78, height: 78, borderRadius: 39, alignItems: "center", justifyContent: "center" },
   avatarInitials: { color: "#fff", fontSize: 28, fontFamily: "Nunito_800ExtraBold" },
   avatarEdit: {
+
     position: "absolute", bottom: 0, right: 0,
     width: 26, height: 26, borderRadius: 13, borderWidth: 2,
     alignItems: "center", justifyContent: "center",
@@ -671,6 +1209,17 @@ const pStyle = StyleSheet.create({
   badgeRow: { flexDirection: "row", gap: 6, flexWrap: "wrap", marginTop: 4 },
   levelBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   levelText: { fontSize: 11, fontFamily: "Nunito_700Bold" },
+  infoBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  infoBadgeFlag: { fontSize: 12 },
+  infoBadgeText: { fontSize: 11, fontFamily: "Nunito_700Bold" },
   langBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 },
   langDot: { width: 6, height: 6, borderRadius: 3 },
   langText: { fontSize: 11, fontFamily: "Nunito_700Bold" },
@@ -681,7 +1230,12 @@ const pStyle = StyleSheet.create({
   learnDot: { width: 6, height: 6, borderRadius: 3 },
   learnText: { fontSize: 12, fontFamily: "Nunito_700Bold" },
   stats: { flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingTop: 14, paddingBottom: 14, borderTopWidth: 1, marginTop: 4 },
+
   statItem: { alignItems: "center", gap: 3 },
+     mapContainer: {
+    width: '100%',
+    height: 200,
+  },
   statNum: { fontSize: 18, fontFamily: "Nunito_800ExtraBold" },
   statLabel: { fontSize: 11, fontFamily: "Nunito_400Regular" },
   statDivider: { width: 1, height: 30 },
@@ -703,4 +1257,49 @@ const pStyle = StyleSheet.create({
   },
   ratingNum: { fontSize: 40, fontFamily: "Nunito_800ExtraBold" },
   ratingCount: { fontSize: 12, fontFamily: "Nunito_400Regular" },
+  fullImageOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.95)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fullImage: {
+    width: "100%",
+    height: "70%",
+  },
+  fullImagePlaceholder: {
+    width: 240,
+    height: 240,
+    borderRadius: 120,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  fullImageInitials: {
+    fontSize: 100,
+    fontFamily: "Nunito_800ExtraBold",
+    color: "#fff",
+  },
+  closeFullImageBtn: {
+    position: "absolute",
+    top: 60,
+    right: 24,
+    zIndex: 50,
+  },
+  // Map background styles
+  mapBackground: {
+    width: 78,
+    height: 78,
+    position: "absolute",
+    top: 0,
+    left: 0,
+  },
+  locationRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  locationText: {
+    fontSize: 12,
+    fontFamily: "Nunito_400Regular",
+  },
 });
