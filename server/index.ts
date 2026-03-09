@@ -2,7 +2,6 @@ import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import "dotenv/config";
 import { registerRoutes } from "./routes";
-import { registerAudioRoutes } from "./replit_integrations/audio/routes";
 import { messageRealtime } from "./messageRealtime";
 import { voiceRealtime } from "./voiceRealtime";
 import * as fs from "fs";
@@ -229,6 +228,10 @@ function setupErrorHandler(app: express.Application) {
   });
 }
 
+function shouldEnableAiIntegrations() {
+  return Boolean(process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+}
+
 (async () => {
   setupCors(app);
   setupBodyParsing(app);
@@ -240,8 +243,10 @@ function setupErrorHandler(app: express.Application) {
   voiceRealtime.attach(server);
   messageRealtime.attach(server);
 
-  // Register audio/voice routes
-  registerAudioRoutes(app);
+  if (shouldEnableAiIntegrations()) {
+    const { registerAudioRoutes } = await import("./replit_integrations/audio/routes");
+    registerAudioRoutes(app);
+  }
 
   setupErrorHandler(app);
 

@@ -1,3 +1,298 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// server/replit_integrations/chat/storage.ts
+var conversations2, messages2, conversationIdCounter, messageIdCounter, chatStorage;
+var init_storage = __esm({
+  "server/replit_integrations/chat/storage.ts"() {
+    "use strict";
+    conversations2 = [];
+    messages2 = [];
+    conversationIdCounter = 1;
+    messageIdCounter = 1;
+    chatStorage = {
+      async getConversation(id) {
+        return conversations2.find((conversation) => conversation.id === id);
+      },
+      async getAllConversations() {
+        return [...conversations2].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+      },
+      async createConversation(title) {
+        const conversation = {
+          id: conversationIdCounter++,
+          title,
+          createdAt: /* @__PURE__ */ new Date()
+        };
+        conversations2.push(conversation);
+        return conversation;
+      },
+      async deleteConversation(id) {
+        const conversationIndex = conversations2.findIndex((conversation) => conversation.id === id);
+        if (conversationIndex >= 0) {
+          conversations2.splice(conversationIndex, 1);
+        }
+        for (let index2 = messages2.length - 1; index2 >= 0; index2--) {
+          if (messages2[index2].conversationId === id) {
+            messages2.splice(index2, 1);
+          }
+        }
+      },
+      async getMessagesByConversation(conversationId) {
+        return messages2.filter((message) => message.conversationId === conversationId).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      },
+      async createMessage(conversationId, role, content) {
+        const message = {
+          id: messageIdCounter++,
+          conversationId,
+          role,
+          content,
+          createdAt: /* @__PURE__ */ new Date()
+        };
+        messages2.push(message);
+        return message;
+      }
+    };
+  }
+});
+
+// server/replit_integrations/audio/client.ts
+import OpenAI2, { toFile } from "openai";
+import { spawn } from "child_process";
+import { writeFile, unlink, readFile } from "fs/promises";
+import { randomUUID as randomUUID2 } from "crypto";
+import { tmpdir } from "os";
+import { join } from "path";
+import "dotenv/config";
+function detectAudioFormat(buffer) {
+  if (buffer.length < 12) return "unknown";
+  if (buffer[0] === 82 && buffer[1] === 73 && buffer[2] === 70 && buffer[3] === 70) {
+    return "wav";
+  }
+  if (buffer[0] === 26 && buffer[1] === 69 && buffer[2] === 223 && buffer[3] === 163) {
+    return "webm";
+  }
+  if (buffer[0] === 255 && (buffer[1] === 251 || buffer[1] === 250 || buffer[1] === 243) || buffer[0] === 73 && buffer[1] === 68 && buffer[2] === 51) {
+    return "mp3";
+  }
+  if (buffer[4] === 102 && buffer[5] === 116 && buffer[6] === 121 && buffer[7] === 112) {
+    return "mp4";
+  }
+  if (buffer[0] === 79 && buffer[1] === 103 && buffer[2] === 103 && buffer[3] === 83) {
+    return "ogg";
+  }
+  return "unknown";
+}
+async function convertToWav(audioBuffer) {
+  const inputPath = join(tmpdir(), `input-${randomUUID2()}`);
+  const outputPath = join(tmpdir(), `output-${randomUUID2()}.wav`);
+  try {
+    await writeFile(inputPath, audioBuffer);
+    await new Promise((resolve2, reject) => {
+      const ffmpeg = spawn("ffmpeg", [
+        "-i",
+        inputPath,
+        "-vn",
+        // Extract audio only (ignore video track)
+        "-f",
+        "wav",
+        "-ar",
+        "16000",
+        // 16kHz sample rate (good for speech)
+        "-ac",
+        "1",
+        // Mono
+        "-acodec",
+        "pcm_s16le",
+        "-y",
+        // Overwrite output
+        outputPath
+      ]);
+      ffmpeg.stderr.on("data", () => {
+      });
+      ffmpeg.on("close", (code) => {
+        if (code === 0) resolve2();
+        else reject(new Error(`ffmpeg exited with code ${code}`));
+      });
+      ffmpeg.on("error", reject);
+    });
+    return await readFile(outputPath);
+  } finally {
+    await unlink(inputPath).catch(() => {
+    });
+    await unlink(outputPath).catch(() => {
+    });
+  }
+}
+async function ensureCompatibleFormat(audioBuffer) {
+  const detected = detectAudioFormat(audioBuffer);
+  if (detected === "wav") return { buffer: audioBuffer, format: "wav" };
+  if (detected === "mp3") return { buffer: audioBuffer, format: "mp3" };
+  const wavBuffer = await convertToWav(audioBuffer);
+  return { buffer: wavBuffer, format: "wav" };
+}
+async function speechToText(audioBuffer, format = "wav") {
+  const file = await toFile(audioBuffer, `audio.${format}`);
+  const response = await openai.audio.transcriptions.create({
+    file,
+    model: "gpt-4o-mini-transcribe"
+  });
+  return response.text;
+}
+var openai;
+var init_client = __esm({
+  "server/replit_integrations/audio/client.ts"() {
+    "use strict";
+    openai = new OpenAI2({
+      apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.OPENAI_BASE_URL || process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
+    });
+  }
+});
+
+// server/replit_integrations/audio/routes.ts
+var routes_exports = {};
+__export(routes_exports, {
+  registerAudioRoutes: () => registerAudioRoutes
+});
+import express from "express";
+function parseRouteId(idParam) {
+  const value = Array.isArray(idParam) ? idParam[0] : idParam;
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+function registerAudioRoutes(app2) {
+  app2.get("/api/conversations", async (req, res) => {
+    try {
+      const conversations3 = await chatStorage.getAllConversations();
+      res.json(conversations3);
+    } catch (error) {
+      console.error("Error fetching conversations:", error);
+      res.status(500).json({ error: "Failed to fetch conversations" });
+    }
+  });
+  app2.get("/api/conversations/:id", async (req, res) => {
+    try {
+      const id = parseRouteId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: "Invalid conversation id" });
+      }
+      const conversation = await chatStorage.getConversation(id);
+      if (!conversation) {
+        return res.status(404).json({ error: "Conversation not found" });
+      }
+      const messages3 = await chatStorage.getMessagesByConversation(id);
+      res.json({ ...conversation, messages: messages3 });
+    } catch (error) {
+      console.error("Error fetching conversation:", error);
+      res.status(500).json({ error: "Failed to fetch conversation" });
+    }
+  });
+  app2.post("/api/conversations", async (req, res) => {
+    try {
+      const { title } = req.body;
+      const conversation = await chatStorage.createConversation(title || "New Chat");
+      res.status(201).json(conversation);
+    } catch (error) {
+      console.error("Error creating conversation:", error);
+      res.status(500).json({ error: "Failed to create conversation" });
+    }
+  });
+  app2.delete("/api/conversations/:id", async (req, res) => {
+    try {
+      const id = parseRouteId(req.params.id);
+      if (id === null) {
+        return res.status(400).json({ error: "Invalid conversation id" });
+      }
+      await chatStorage.deleteConversation(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting conversation:", error);
+      res.status(500).json({ error: "Failed to delete conversation" });
+    }
+  });
+  app2.post("/api/conversations/:id/messages", audioBodyParser, async (req, res) => {
+    try {
+      const conversationId = parseRouteId(req.params.id);
+      if (conversationId === null) {
+        return res.status(400).json({ error: "Invalid conversation id" });
+      }
+      const { audio, voice = "alloy" } = req.body;
+      if (!audio) {
+        return res.status(400).json({ error: "Audio data (base64) is required" });
+      }
+      const rawBuffer = Buffer.from(audio, "base64");
+      const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
+      const userTranscript = await speechToText(audioBuffer, inputFormat);
+      await chatStorage.createMessage(conversationId, "user", userTranscript);
+      const existingMessages = await chatStorage.getMessagesByConversation(conversationId);
+      const chatHistory = existingMessages.map((m) => ({
+        role: m.role,
+        content: m.content
+      }));
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.write(`data: ${JSON.stringify({ type: "user_transcript", data: userTranscript })}
+
+`);
+      const stream = await openai.chat.completions.create({
+        model: "gpt-audio",
+        modalities: ["text", "audio"],
+        audio: { voice, format: "pcm16" },
+        messages: chatHistory,
+        stream: true
+      });
+      let assistantTranscript = "";
+      for await (const chunk of stream) {
+        const delta = chunk.choices?.[0]?.delta;
+        if (!delta) continue;
+        if (delta?.audio?.transcript) {
+          assistantTranscript += delta.audio.transcript;
+          res.write(`data: ${JSON.stringify({ type: "transcript", data: delta.audio.transcript })}
+
+`);
+        }
+        if (delta?.audio?.data) {
+          res.write(`data: ${JSON.stringify({ type: "audio", data: delta.audio.data })}
+
+`);
+        }
+      }
+      await chatStorage.createMessage(conversationId, "assistant", assistantTranscript);
+      res.write(`data: ${JSON.stringify({ type: "done", transcript: assistantTranscript })}
+
+`);
+      res.end();
+    } catch (error) {
+      console.error("Error processing voice message:", error);
+      if (res.headersSent) {
+        res.write(`data: ${JSON.stringify({ type: "error", error: "Failed to process voice message" })}
+
+`);
+        res.end();
+      } else {
+        res.status(500).json({ error: "Failed to process voice message" });
+      }
+    }
+  });
+}
+var audioBodyParser;
+var init_routes = __esm({
+  "server/replit_integrations/audio/routes.ts"() {
+    "use strict";
+    init_storage();
+    init_client();
+    audioBodyParser = express.json({ limit: "50mb" });
+  }
+});
+
 // server/index.ts
 import express2 from "express";
 import "dotenv/config";
@@ -2044,269 +2339,6 @@ Your role:
   return httpServer;
 }
 
-// server/replit_integrations/audio/routes.ts
-import express from "express";
-
-// server/replit_integrations/chat/storage.ts
-var conversations2 = [];
-var messages2 = [];
-var conversationIdCounter = 1;
-var messageIdCounter = 1;
-var chatStorage = {
-  async getConversation(id) {
-    return conversations2.find((conversation) => conversation.id === id);
-  },
-  async getAllConversations() {
-    return [...conversations2].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-  },
-  async createConversation(title) {
-    const conversation = {
-      id: conversationIdCounter++,
-      title,
-      createdAt: /* @__PURE__ */ new Date()
-    };
-    conversations2.push(conversation);
-    return conversation;
-  },
-  async deleteConversation(id) {
-    const conversationIndex = conversations2.findIndex((conversation) => conversation.id === id);
-    if (conversationIndex >= 0) {
-      conversations2.splice(conversationIndex, 1);
-    }
-    for (let index2 = messages2.length - 1; index2 >= 0; index2--) {
-      if (messages2[index2].conversationId === id) {
-        messages2.splice(index2, 1);
-      }
-    }
-  },
-  async getMessagesByConversation(conversationId) {
-    return messages2.filter((message) => message.conversationId === conversationId).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  },
-  async createMessage(conversationId, role, content) {
-    const message = {
-      id: messageIdCounter++,
-      conversationId,
-      role,
-      content,
-      createdAt: /* @__PURE__ */ new Date()
-    };
-    messages2.push(message);
-    return message;
-  }
-};
-
-// server/replit_integrations/audio/client.ts
-import OpenAI2, { toFile } from "openai";
-import { spawn } from "child_process";
-import { writeFile, unlink, readFile } from "fs/promises";
-import { randomUUID as randomUUID2 } from "crypto";
-import { tmpdir } from "os";
-import { join } from "path";
-import "dotenv/config";
-var openai = new OpenAI2({
-  apiKey: process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.OPENAI_BASE_URL || process.env.AI_INTEGRATIONS_OPENAI_BASE_URL
-});
-function detectAudioFormat(buffer) {
-  if (buffer.length < 12) return "unknown";
-  if (buffer[0] === 82 && buffer[1] === 73 && buffer[2] === 70 && buffer[3] === 70) {
-    return "wav";
-  }
-  if (buffer[0] === 26 && buffer[1] === 69 && buffer[2] === 223 && buffer[3] === 163) {
-    return "webm";
-  }
-  if (buffer[0] === 255 && (buffer[1] === 251 || buffer[1] === 250 || buffer[1] === 243) || buffer[0] === 73 && buffer[1] === 68 && buffer[2] === 51) {
-    return "mp3";
-  }
-  if (buffer[4] === 102 && buffer[5] === 116 && buffer[6] === 121 && buffer[7] === 112) {
-    return "mp4";
-  }
-  if (buffer[0] === 79 && buffer[1] === 103 && buffer[2] === 103 && buffer[3] === 83) {
-    return "ogg";
-  }
-  return "unknown";
-}
-async function convertToWav(audioBuffer) {
-  const inputPath = join(tmpdir(), `input-${randomUUID2()}`);
-  const outputPath = join(tmpdir(), `output-${randomUUID2()}.wav`);
-  try {
-    await writeFile(inputPath, audioBuffer);
-    await new Promise((resolve2, reject) => {
-      const ffmpeg = spawn("ffmpeg", [
-        "-i",
-        inputPath,
-        "-vn",
-        // Extract audio only (ignore video track)
-        "-f",
-        "wav",
-        "-ar",
-        "16000",
-        // 16kHz sample rate (good for speech)
-        "-ac",
-        "1",
-        // Mono
-        "-acodec",
-        "pcm_s16le",
-        "-y",
-        // Overwrite output
-        outputPath
-      ]);
-      ffmpeg.stderr.on("data", () => {
-      });
-      ffmpeg.on("close", (code) => {
-        if (code === 0) resolve2();
-        else reject(new Error(`ffmpeg exited with code ${code}`));
-      });
-      ffmpeg.on("error", reject);
-    });
-    return await readFile(outputPath);
-  } finally {
-    await unlink(inputPath).catch(() => {
-    });
-    await unlink(outputPath).catch(() => {
-    });
-  }
-}
-async function ensureCompatibleFormat(audioBuffer) {
-  const detected = detectAudioFormat(audioBuffer);
-  if (detected === "wav") return { buffer: audioBuffer, format: "wav" };
-  if (detected === "mp3") return { buffer: audioBuffer, format: "mp3" };
-  const wavBuffer = await convertToWav(audioBuffer);
-  return { buffer: wavBuffer, format: "wav" };
-}
-async function speechToText(audioBuffer, format = "wav") {
-  const file = await toFile(audioBuffer, `audio.${format}`);
-  const response = await openai.audio.transcriptions.create({
-    file,
-    model: "gpt-4o-mini-transcribe"
-  });
-  return response.text;
-}
-
-// server/replit_integrations/audio/routes.ts
-var audioBodyParser = express.json({ limit: "50mb" });
-function parseRouteId(idParam) {
-  const value = Array.isArray(idParam) ? idParam[0] : idParam;
-  const parsed = Number.parseInt(String(value), 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-function registerAudioRoutes(app2) {
-  app2.get("/api/conversations", async (req, res) => {
-    try {
-      const conversations3 = await chatStorage.getAllConversations();
-      res.json(conversations3);
-    } catch (error) {
-      console.error("Error fetching conversations:", error);
-      res.status(500).json({ error: "Failed to fetch conversations" });
-    }
-  });
-  app2.get("/api/conversations/:id", async (req, res) => {
-    try {
-      const id = parseRouteId(req.params.id);
-      if (id === null) {
-        return res.status(400).json({ error: "Invalid conversation id" });
-      }
-      const conversation = await chatStorage.getConversation(id);
-      if (!conversation) {
-        return res.status(404).json({ error: "Conversation not found" });
-      }
-      const messages3 = await chatStorage.getMessagesByConversation(id);
-      res.json({ ...conversation, messages: messages3 });
-    } catch (error) {
-      console.error("Error fetching conversation:", error);
-      res.status(500).json({ error: "Failed to fetch conversation" });
-    }
-  });
-  app2.post("/api/conversations", async (req, res) => {
-    try {
-      const { title } = req.body;
-      const conversation = await chatStorage.createConversation(title || "New Chat");
-      res.status(201).json(conversation);
-    } catch (error) {
-      console.error("Error creating conversation:", error);
-      res.status(500).json({ error: "Failed to create conversation" });
-    }
-  });
-  app2.delete("/api/conversations/:id", async (req, res) => {
-    try {
-      const id = parseRouteId(req.params.id);
-      if (id === null) {
-        return res.status(400).json({ error: "Invalid conversation id" });
-      }
-      await chatStorage.deleteConversation(id);
-      res.status(204).send();
-    } catch (error) {
-      console.error("Error deleting conversation:", error);
-      res.status(500).json({ error: "Failed to delete conversation" });
-    }
-  });
-  app2.post("/api/conversations/:id/messages", audioBodyParser, async (req, res) => {
-    try {
-      const conversationId = parseRouteId(req.params.id);
-      if (conversationId === null) {
-        return res.status(400).json({ error: "Invalid conversation id" });
-      }
-      const { audio, voice = "alloy" } = req.body;
-      if (!audio) {
-        return res.status(400).json({ error: "Audio data (base64) is required" });
-      }
-      const rawBuffer = Buffer.from(audio, "base64");
-      const { buffer: audioBuffer, format: inputFormat } = await ensureCompatibleFormat(rawBuffer);
-      const userTranscript = await speechToText(audioBuffer, inputFormat);
-      await chatStorage.createMessage(conversationId, "user", userTranscript);
-      const existingMessages = await chatStorage.getMessagesByConversation(conversationId);
-      const chatHistory = existingMessages.map((m) => ({
-        role: m.role,
-        content: m.content
-      }));
-      res.setHeader("Content-Type", "text/event-stream");
-      res.setHeader("Cache-Control", "no-cache");
-      res.setHeader("Connection", "keep-alive");
-      res.write(`data: ${JSON.stringify({ type: "user_transcript", data: userTranscript })}
-
-`);
-      const stream = await openai.chat.completions.create({
-        model: "gpt-audio",
-        modalities: ["text", "audio"],
-        audio: { voice, format: "pcm16" },
-        messages: chatHistory,
-        stream: true
-      });
-      let assistantTranscript = "";
-      for await (const chunk of stream) {
-        const delta = chunk.choices?.[0]?.delta;
-        if (!delta) continue;
-        if (delta?.audio?.transcript) {
-          assistantTranscript += delta.audio.transcript;
-          res.write(`data: ${JSON.stringify({ type: "transcript", data: delta.audio.transcript })}
-
-`);
-        }
-        if (delta?.audio?.data) {
-          res.write(`data: ${JSON.stringify({ type: "audio", data: delta.audio.data })}
-
-`);
-        }
-      }
-      await chatStorage.createMessage(conversationId, "assistant", assistantTranscript);
-      res.write(`data: ${JSON.stringify({ type: "done", transcript: assistantTranscript })}
-
-`);
-      res.end();
-    } catch (error) {
-      console.error("Error processing voice message:", error);
-      if (res.headersSent) {
-        res.write(`data: ${JSON.stringify({ type: "error", error: "Failed to process voice message" })}
-
-`);
-        res.end();
-      } else {
-        res.status(500).json({ error: "Failed to process voice message" });
-      }
-    }
-  });
-}
-
 // server/index.ts
 import * as fs2 from "fs";
 import * as path2 from "path";
@@ -2466,6 +2498,9 @@ function setupErrorHandler(app2) {
     return res.status(status).json({ message });
   });
 }
+function shouldEnableAiIntegrations() {
+  return Boolean(process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY);
+}
 (async () => {
   setupCors(app);
   setupBodyParsing(app);
@@ -2474,7 +2509,10 @@ function setupErrorHandler(app2) {
   const server = await registerRoutes(app);
   voiceRealtime.attach(server);
   messageRealtime.attach(server);
-  registerAudioRoutes(app);
+  if (shouldEnableAiIntegrations()) {
+    const { registerAudioRoutes: registerAudioRoutes2 } = await Promise.resolve().then(() => (init_routes(), routes_exports));
+    registerAudioRoutes2(app);
+  }
   setupErrorHandler(app);
   const port = parseInt(process.env.PORT || "5000", 10);
   server.listen(
