@@ -52,7 +52,108 @@ export type VoiceRoomMessage = {
   ts: number;
 };
 
-const seedRooms: VoiceRoom[] = [];
+const seedRooms: VoiceRoom[] = [
+  {
+    id: "seed-1",
+    topic: "Daily English Conversation",
+    language: "English",
+    languageCode: "en",
+    description: "Practice everyday English with fellow learners!",
+    participants: [
+      { id: "host-1", name: "Sarah", initials: "SA", color: "#FF6B35", role: "speaker", isMuted: false, isSpeaking: true, nativeLanguage: "English" },
+      { id: "user-1", name: "Marco", initials: "MA", color: "#4ECDC4", role: "speaker", isMuted: true, isSpeaking: false, nativeLanguage: "Spanish" },
+    ],
+    level: "Intermediate",
+    tags: ["English", "Intermediate", "chat"],
+    theme: "chat",
+    background: "galaxy",
+    hostId: "host-1",
+    hostName: "Sarah",
+    hostInitials: "SA",
+    hostColor: "#FF6B35",
+    speakerRequests: [],
+  },
+  {
+    id: "seed-2",
+    topic: "Spanish Oral Practice",
+    language: "Spanish",
+    languageCode: "es",
+    description: "¡Hablemos en español! All levels welcome.",
+    participants: [
+      { id: "host-2", name: "Carlos", initials: "CA", color: "#8B7CF6", role: "speaker", isMuted: false, isSpeaking: false, nativeLanguage: "Spanish" },
+    ],
+    level: "All Levels",
+    tags: ["Spanish", "All Levels", "oral_practice"],
+    theme: "oral_practice",
+    background: "rose",
+    hostId: "host-2",
+    hostName: "Carlos",
+    hostInitials: "CA",
+    hostColor: "#8B7CF6",
+    speakerRequests: [],
+  },
+  {
+    id: "seed-3",
+    topic: "Japanese Culture & Language",
+    language: "Japanese",
+    languageCode: "ja",
+    description: "Learn Japanese through cultural discussions!",
+    participants: [
+      { id: "host-3", name: "Yuki", initials: "YU", color: "#F7C948", role: "speaker", isMuted: false, isSpeaking: true, nativeLanguage: "Japanese" },
+      { id: "user-2", name: "Ken", initials: "KE", color: "#45B7D1", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "English" },
+      { id: "user-3", name: "Anna", initials: "AN", color: "#6BCB77", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "German" },
+    ],
+    level: "Beginner",
+    tags: ["Japanese", "Beginner", "culture"],
+    theme: "culture",
+    background: "spring",
+    hostId: "host-3",
+    hostName: "Yuki",
+    hostInitials: "YU",
+    hostColor: "#F7C948",
+    speakerRequests: [],
+  },
+  {
+    id: "seed-4",
+    topic: "French Make Friends",
+    language: "French",
+    languageCode: "fr",
+    description: "Meet new friends and practice French together!",
+    participants: [
+      { id: "host-4", name: "Marie", initials: "MA", color: "#FF6B9D", role: "speaker", isMuted: false, isSpeaking: false, nativeLanguage: "French" },
+    ],
+    level: "All Levels",
+    tags: ["French", "All Levels", "make_friends"],
+    theme: "make_friends",
+    background: "summer",
+    hostId: "host-4",
+    hostName: "Marie",
+    hostInitials: "MA",
+    hostColor: "#FF6B9D",
+    speakerRequests: [],
+  },
+  {
+    id: "seed-5",
+    topic: "K-Pop & Korean Learning",
+    language: "Korean",
+    languageCode: "ko",
+    description: "Learn Korean through your favorite K-Pop songs!",
+    participants: [
+      { id: "host-5", name: "Ji-Yoon", initials: "JY", color: "#EF4444", role: "speaker", isMuted: false, isSpeaking: true, nativeLanguage: "Korean" },
+      { id: "user-4", name: "Luna", initials: "LU", color: "#EC4899", role: "speaker", isMuted: true, isSpeaking: false, nativeLanguage: "English" },
+      { id: "user-5", name: "Min-Jun", initials: "MJ", color: "#3B82F6", role: "listener", isMuted: true, isSpeaking: false, nativeLanguage: "Korean" },
+    ],
+    level: "Intermediate",
+    tags: ["Korean", "Intermediate", "music"],
+    theme: "music",
+    background: "mario",
+    hostId: "host-5",
+    hostName: "Ji-Yoon",
+    hostInitials: "JY",
+    hostColor: "#EF4444",
+    speakerRequests: [],
+  },
+];
 const legacyDemoRoomIds = new Set(["r-1", "r-2", "r-3"]);
 
 function isFakeRoom(room: VoiceRoom): boolean {
@@ -92,6 +193,12 @@ export class VoiceRoomsStore {
 
     try {
       await fs.access(this.filePath);
+      // Check if file is empty or has no valid rooms, then seed with defaults
+      const raw = await fs.readFile(this.filePath, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (!parsed.rooms || !Array.isArray(parsed.rooms) || parsed.rooms.length === 0) {
+        await this.writeFile({ rooms: seedRooms });
+      }
     } catch {
       await this.writeFile({ rooms: seedRooms });
     }
